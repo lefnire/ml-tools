@@ -23,10 +23,8 @@ def chain(device_in=None):
             res = fn(self, x, y, *args, **kwargs)
             # Always maintain [x, y] for consistency
             if type(res) != list: res = [res, None]
-            # Save intermediate result
-            self.result = res
-            # Return self, so chained methods can continue
-            return self
+            # Save intermediate result, and chained methods can continue
+            return Similars(*res)
         return wrapper
     return decorator
 
@@ -132,20 +130,19 @@ class Similars(object):
         """
         Agglomorative (hierarchical) clustering.
         :param cluster_both: if True, cluster x & y from the same pool & return [x_labels, y_labels]; otherwise just
-            cluster x. Must use cluster(combo_pairwise=True) beforehand.
+            cluster x.
         """
-        x_, y_ = x, y
+        x_orig = x
         if cluster_both and y is not None:
-            self.result = [self._join(x, y), None]
-            self.cosine(abs=True)
-        x, y = self.get_values('cpu')
+            x = self._join(x, y)
+        x = Similars(x).cosine(abs=True).value()
         nc = self._default_n_clusters(x)
         labels = AgglomerativeClustering(
             n_clusters=nc,
             affinity='precomputed',
             linkage='average'
         ).fit_predict(x)
-        return self._split(labels, x_, y_) if cluster_both else labels
+        return self._split(labels, x_orig, y) if cluster_both else labels
 
     @chain(device_in='cpu')
     def kmeans(self, x, y, cluster_both=False):

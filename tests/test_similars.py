@@ -79,8 +79,8 @@ def test_cluster(algo, cluster_both, x, y):
         res = res.kmeans(cluster_both=cluster_both)
     res = res.value()
     print(res)
-    if y is None:
-        assert len(res) == len(x)
-    else:
+    if cluster_both and y:
         assert len(res) == 2
         assert len(res[1]) == len(y)
+    else:
+        assert len(res) == len(x)
