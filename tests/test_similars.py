@@ -72,12 +72,7 @@ def test_normalize(abs, x, y):
         ('agglomorative', False, X, Y),
     ])
 def test_cluster(algo, cluster_both, x, y):
-    res = Similars(x, y).embed().normalize()
-    if algo == 'agglomorative':
-        res = res.agglomorative(cluster_both=cluster_both)
-    else:
-        res = res.kmeans(cluster_both=cluster_both)
-    res = res.value()
+    res = Similars(x, y).embed().normalize().cluster(algo=algo, cluster_both=cluster_both).value()
     print(res)
     if cluster_both and y:
         assert len(res) == 2

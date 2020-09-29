@@ -124,39 +124,38 @@ class Similars(object):
     def _default_n_clusters(self, x):
         return math.floor(1 + 3.5 * math.log10(x.shape[0]))
 
-    # Don't set device_in, in case cluster_both=True and we're getting gpu (if False, it's cpu)
+    # Don't set device_in, in case algo=agg & cluster_both=True
     @chain()
-    def agglomorative(self, x, y, cluster_both=False):
+    def cluster(self, x, y, algo='agglomorative', cluster_both=False):
         """
-        Agglomorative (hierarchical) clustering.
-        :param cluster_both: if True, cluster x & y from the same pool & return [x_labels, y_labels]; otherwise just
-            cluster x.
+        :param cluster_both: if True, cluster x & y from the same pool & return [x_labels, y_labels];
+            otherwise just cluster x.
         """
-        x_orig = x
+        combo = x
         if cluster_both and y is not None:
-            x = self._join(x, y)
-        x = Similars(x).cosine(abs=True).value()
-        nc = self._default_n_clusters(x)
-        labels = AgglomerativeClustering(
-            n_clusters=nc,
-            affinity='precomputed',
-            linkage='average'
-        ).fit_predict(x)
-        return self._split(labels, x_orig, y) if cluster_both else labels
-
-    @chain(device_in='cpu')
-    def kmeans(self, x, y, cluster_both=False):
-        combo = self._join(x, y) if cluster_both else x
-
-        # Code from https://github.com/arvkevi/kneed/blob/master/notebooks/decreasing_function_walkthrough.ipynb
-        step = 2  # math.ceil(guess.max / 10)
-        K = range(2, 40, step)
-        scores = []
-        for k in K:
-            km = KMeans(n_clusters=k).fit(combo)
-            scores.append(km.inertia_)
-        S = 1  # math.floor(math.log(all.shape[0]))  # 1=default; 100entries->S=2, 8k->3
-        kn = KneeLocator(list(K), scores, S=S, curve='convex', direction='decreasing', interp_method='polynomial')
-        nc = kn.knee or self._default_n_clusters(combo)
-        labels = KMeans(n_clusters=nc).fit(combo).labels_
+            combo = self._join(x, y)
+        combo = Similars(combo)
+        if algo == 'agglomorative':
+            combo = combo.cosine(abs=True).value()
+            nc = self._default_n_clusters(combo)
+            labels = AgglomerativeClustering(
+                n_clusters=nc,
+                affinity='precomputed',
+                linkage='average'
+            ).fit_predict(combo)
+        elif algo == 'kmeans':
+            combo = combo.value()
+            # Code from https://github.com/arvkevi/kneed/blob/master/notebooks/decreasing_function_walkthrough.ipynb
+            step = 2  # math.ceil(guess.max / 10)
+            K = range(2, 40, step)
+            scores = []
+            for k in K:
+                km = KMeans(n_clusters=k).fit(combo)
+                scores.append(km.inertia_)
+            S = 1  # math.floor(math.log(all.shape[0]))  # 1=default; 100entries->S=2, 8k->3
+            kn = KneeLocator(list(K), scores, S=S, curve='convex', direction='decreasing', interp_method='polynomial')
+            nc = kn.knee or self._default_n_clusters(combo)
+            labels = KMeans(n_clusters=nc).fit(combo).labels_
+        else:
+            raise Exception("Other clusterers not yet supported (use kmeans|agglomorative)")
         return self._split(labels, x, y) if cluster_both else labels
