@@ -1,6 +1,6 @@
 import pytest
 import numpy as np
-from lefnire_ml_utils import Similars
+from lefnire_ml_utils import Similars, cleantext
 
 corpus = ['A man is eating food.',
           'A man is eating a piece of bread.',
@@ -79,3 +79,20 @@ def test_cluster(algo, cluster_both, x, y):
         assert len(res[1]) == len(y)
     else:
         assert len(res) == len(x)
+
+@pytest.mark.parametrize(
+    "methods,x,y",
+    [
+        ([cleantext.keywords], corpus, None),
+        ([cleantext.keywords], X, Y),
+        ([cleantext.strip_html, cleantext.keywords], corpus, None),
+        ([cleantext.strip_html, cleantext.keywords], X, Y),
+    ])
+def test_cleantext(methods, x, y):
+    res = Similars(x, y).cleantext(methods).value()
+    print(res)
+    if y is None:
+        assert len(res) == len(x)
+    else:
+        assert len(res) == 2
+        assert len(res[1]) == len(y)

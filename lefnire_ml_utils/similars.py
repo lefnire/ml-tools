@@ -6,6 +6,8 @@ from kneed import KneeLocator
 from sklearn.cluster import MiniBatchKMeans as KMeans
 from sentence_transformers import SentenceTransformer
 from typing import List, Union
+from sklearn.metrics import pairwise_distances, pairwise_distances_chunked
+from . import cleantext
 
 
 # https://stackoverflow.com/a/7590709/362790
@@ -33,11 +35,12 @@ class Similars(object):
     """
     Various similarity helper functions.
 
-    * NLP methods: clean_text, tf_idf, embed (via sentence_transformers), etc
-    Call like Similars(sentences).embed() or Similars(lhs, rhs).clean_text().tfidf()
+    * NLP methods: cleantext, tf_idf, embed (via sentence_transformers), etc
+    Call like Similars(sentences).embed() or Similars(lhs, rhs).cleantext().tfidf()
 
     * Similarity methods: normalize, cosine, kmeans, agglomorative, etc
-    Call like Similars(x, y).noramlize().cosine().agglomorative()
+    Clustering: Similars(x, y).normalize().cluster(algo='agglomorative')
+    Similarity: Similars(x).normalize.cosine()  (then sort low to high)
 
     Takes x, y. If y is provided, then we're comparing x to y. If y is None, then operations
     are pairwise on x (x compared to x).
@@ -90,10 +93,23 @@ class Similars(object):
         return self._split(enco, x, y)
 
     @chain()
-    def dim_reduce(self, x, y): pass
+    def dim_reduce(self, x, y, method='autoencoder'):
+        """
+        :param method: autoencoder|pca|tsne
+        """
+        raise Exception("dim_reduce not yet implemented. I'll add basic AutoEncoder soon")
 
     @chain()
-    def tf_idf(self, x, y): pass
+    def cleantext(self, x, y, methods=[cleantext.keywords]):
+        combo = self._join(x, y)
+        combo = cleantext.multiple(combo, methods)
+        return self._split(combo, x, y)
+
+    @chain()
+    def tf_idf(self, x, y):
+        combo = self._join(x, y)
+        combo = TfidfVectorizer().fit_transform(combo)
+        return self._split(combo, x, y)
 
     @chain(device_in='gpu')
     def normalize(self, x, y):
@@ -120,6 +136,10 @@ class Similars(object):
         else:
             dist = 1. - sim
         return dist
+
+    def jensenshannon(self, x, y):
+        # TODO ignores y for now, x expected to be square tf-idf matrix. Probably doesn't work currently
+        return pairwise_distances(x, metric=jensenshannon)
 
     def _default_n_clusters(self, x):
         return math.floor(1 + 3.5 * math.log10(x.shape[0]))
