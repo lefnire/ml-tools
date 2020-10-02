@@ -96,3 +96,27 @@ def test_cleantext(methods, x, y):
     else:
         assert len(res) == 2
         assert len(res[1]) == len(y)
+
+
+@pytest.mark.parametrize(
+    "path,k,cluster_x,x,y",
+    [
+        ('/storage/tmp1.bin',10,None,corpus,None),
+        ('/storage/tmp2.bin',10,None,corpus,Y),
+        (None,10,None,corpus,None),
+        (None,10,None,corpus,Y),
+        ('/storage/tmp1.bin',10,'agglomorative',corpus,None),
+        ('/storage/tmp2.bin',10,'agglomorative',corpus,Y),
+        ('/storage/tmp2.bin',10,'kmeans',corpus,Y),
+        ('/storage/tmp1.bin',1,False,corpus,None),
+        ('/storage/tmp2.bin',1,False,corpus,Y),
+    ])
+def test_ann(path, k, cluster_x, x, y):
+    def fn():
+        res = Similars(x, y).embed().ann(y_from_file=path, k=k, cluster_x=cluster_x)
+        print(res)
+    if (cluster_x and not k) or (y is None):
+        with pytest.raises(Exception): fn()
+    else:
+        fn()
+

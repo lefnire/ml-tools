@@ -1,12 +1,13 @@
-import math, pdb
+import math, pdb, os
 import torch
 import numpy as np
 from sklearn.cluster import AgglomerativeClustering
 from kneed import KneeLocator
 from sklearn.cluster import MiniBatchKMeans as KMeans
-from sentence_transformers import SentenceTransformer
+from sentence_transformers import SentenceTransformer, util
 from typing import List, Union
 from sklearn.metrics import pairwise_distances, pairwise_distances_chunked
+import hnswlib
 from . import cleantext
 
 
@@ -136,6 +137,56 @@ class Similars(object):
         else:
             dist = 1. - sim
         return dist
+
+    @chain(device_in='cpu')
+    def ann(self, x, y, y_from_file=None, k=None, cluster_x=None):
+        """
+        Adapted from https://github.com/UKPLab/sentence-transformers/blob/master/examples/applications/semantic_search_quora_hnswlib.py
+        Finds top-k similar y similar embeddings to x.
+        :param y_from_file: if provided, will attempt to load from this path. If fails, will train index & save to
+            this path, to be loaded next time
+        :param k: how many results per x-row to return? If 1, just find closest match per row.
+        :param cluster_x: (None|agglomorative|kmeans). If specified, set k and it will find (n_in_cluster/k) per
+            cluster-mean
+        """
+        if y is None: raise Exception("y required; it's the index you query")
+        if y_from_file and os.path.exists(y_from_file):
+            index = hnswlib.Index(space='cosine', dim=x.shape[1])
+            index.load_index(y_from_file)
+        else:
+            # Defining our hnswlib index
+            # We use Inner Product (dot-product) as Index. We will normalize our vectors to unit length, then is Inner Product equal to cosine similarity
+            index = hnswlib.Index(space='cosine', dim=y.shape[1])
+
+            ### Create the HNSWLIB index
+            print("Start creating HNSWLIB index")
+            # UKPLab tutorial used M=16, but https://github.com/nmslib/hnswlib/blob/master/ALGO_PARAMS.md suggests 64
+            # for word embeddings (though these are sentence-embeddings)
+            index.init_index(max_elements=y.shape[0], ef_construction=200, M=64)
+
+            # Then we train the index to find a suitable clustering
+            index.add_items(y, np.arange(y.shape[0]))
+            index.save_index(y_from_file)
+
+        # Controlling the recall by setting ef:
+        # ef = 50
+        ef = max(k + 1, min(1000, index.get_max_elements()))
+        index.set_ef(ef)  # ef should always be > top_k_hits
+
+        if not cluster_x:
+            # We use hnswlib knn_query method to find the top_k_hits
+            idxs, distances = index.knn_query(x, k=k)
+            return idxs, distances
+
+        assert k, "k must be specified if using cluster_x"
+        clusters = Similars(x).normalize().cluster(algo=cluster_x).value()
+        idxs, distances = [], []
+        for l in range(clusters.max()):
+            k_ = (clusters == l).sum()//k
+            x_ = x[clusters == l].mean(0)
+            i, d = index.knn_query(x_, k=k_)
+            idxs.append(i);distances.append(d)
+        return np.vstack(idxs), np.vstack(distances)
 
     def jensenshannon(self, x, y):
         # TODO ignores y for now, x expected to be square tf-idf matrix. Probably doesn't work currently
