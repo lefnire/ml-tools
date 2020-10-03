@@ -13,7 +13,7 @@ corpus = ['A man is eating food.',
           'Someone in a gorilla costume is playing a set of drums.',
           'A cheetah is running behind its prey.',
           'A cheetah chases prey on across a field.'
-          ] * 5
+          ] * 10
 
 split_ = len(corpus)//3
 X, Y = corpus[:split_], corpus[split_:]
@@ -99,7 +99,7 @@ def test_cleantext(methods, x, y):
 
 
 @pytest.mark.parametrize(
-    "path,k,cluster_x,x,y",
+    "path,k,algo,x,y",
     [
         ('/storage/tmp1.bin',10,None,corpus,None),
         ('/storage/tmp2.bin',10,None,corpus,Y),
@@ -111,12 +111,41 @@ def test_cleantext(methods, x, y):
         ('/storage/tmp1.bin',1,False,corpus,None),
         ('/storage/tmp2.bin',1,False,corpus,Y),
     ])
-def test_ann(path, k, cluster_x, x, y):
+def test_ann(path, k, algo, x, y):
     def fn():
-        res = Similars(x, y).embed().ann(y_from_file=path, k=k, cluster_x=cluster_x)
+        chain = Similars(x, y).embed()
+        if algo: chain = chain.cluster(algo=algo)
+        res = chain.ann(y_from_file=path, top_k=k).value()
         print(res)
-    if (cluster_x and not k) or (y is None):
+        return res
+    if (algo and not k) or (y is None):
         with pytest.raises(Exception): fn()
     else:
         fn()
+
+
+@pytest.mark.parametrize(
+    "x,y,algo,k",
+    [
+        (corpus,None,None,None),
+        (X,Y,None,None),
+        (corpus,None,'agglomorative',None),
+        (X,Y,'agglomorative',None),
+        # (corpus,None,'agglomorative',10),
+        (X,Y,'agglomorative',10),
+        # (corpus,None,'kmeans',10),
+        (X,Y,'kmeans',10),
+    ])
+def test_cosine(x,y,algo,k):
+    def fn():
+        chain = Similars(x, y).embed()
+        if algo: chain = chain.cluster(algo=algo)
+        res = chain.cosine(top_k=k).value()
+        print(res)
+        return res
+    if algo and not k:
+        with pytest.raises(Exception): fn()
+    else:
+        fn()
+
 

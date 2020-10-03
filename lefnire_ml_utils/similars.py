@@ -7,7 +7,6 @@ from sklearn.cluster import MiniBatchKMeans as KMeans
 from sentence_transformers import SentenceTransformer, util
 from typing import List, Union
 from sklearn.metrics import pairwise_distances, pairwise_distances_chunked
-import hnswlib
 from . import cleantext
 
 
@@ -27,7 +26,10 @@ def chain(device_in=None):
             # Always maintain [x, y] for consistency
             if type(res) != list: res = [res, None]
             # Save intermediate result, and chained methods can continue
-            return Similars(*res)
+            last_fn = fn.__name__
+            if last_fn == 'cluster':
+                return Similars(x, y, last_fn=last_fn, labels=res)
+            return Similars(*res, last_fn=last_fn)
         return wrapper
     return decorator
 
@@ -49,12 +51,17 @@ class Similars(object):
     def __init__(
         self,
         x: Union[List[str], np.ndarray],
-        y: Union[List[str], np.ndarray] = None
+        y: Union[List[str], np.ndarray] = None,
+        last_fn: str = None,
+        labels: List[np.ndarray] = None
     ):
         self.result = [x, y]
+        self.last_fn = last_fn
+        self.labels = labels
 
     def value(self):
-        x, y = self.get_values('cpu')
+        x, y = self.labels if self.last_fn == 'cluster'\
+            else self.get_values('cpu')
         if y is None: return x
         return [x, y]
 
@@ -87,7 +94,7 @@ class Similars(object):
     def embed(self, x: List[str], y: List[str]=None):
         enco = SentenceTransformer('roberta-base-nli-stsb-mean-tokens').encode(
             self._join(x, y),
-            batch_size=32,
+            batch_size=16,
             show_progress_bar=True,
             convert_to_tensor=True
         )
@@ -118,14 +125,30 @@ class Similars(object):
         norm = norm / norm.norm(dim=1)[:, None]
         return self._split(norm, x, y)
 
-    @chain(device_in='gpu')
-    def cosine(self, x, y, abs=False):
-        """
-        :param abs: Hierarchical clustering wants [0 1], and dists.sort_by(0->1), but cosine is [-1 1]. Set True to
-            ensure cosine>0. Only needed currently for agglomorative()
-        """
-        if y is None:
-            y = x
+    @staticmethod
+    def _unsqueeze(t):
+        if len(t.shape) > 1: return t
+        return t.unsqueeze(0)
+
+    def _sims_by_clust(self, x, top_k, fn):
+        assert torch.is_tensor(x), "_sims_by_clust written assuming GPU in, looks like I was wrong & got a CPU val; fix this"
+        assert top_k, "top_k must be specified if using clusters in similarity functions"
+        labels = self.labels[0]
+        res = []
+        for l in range(labels.max()):
+            mask = (labels == l)
+            if mask.sum() == 0: continue
+            k = math.ceil(mask.sum() / top_k)
+            x_ = x[mask].mean(0)
+            r = fn(x_, k)
+            res.append(torch.cat((r.values, r.indices), 1))
+        return torch.stack(res)
+
+    def _cosine(self, x, y, abs=False, top_k=None):
+        x = self._unsqueeze(x)
+        if y is None: y = x
+        else: y = self._unsqueeze(y)
+
         sim = torch.mm(x, y.T)
 
         if abs:
@@ -136,19 +159,36 @@ class Similars(object):
             # dist = 1 - (sim + 1) / 2
         else:
             dist = 1. - sim
-        return dist
+        if top_k is None: return dist
+        # See UKPLab/sentence_transformers/util.py#paraphrase_mining. We may want to switch to that,
+        # only reason I'm using custom code is `abs=True` (for agglomorative) which not supported there
+        return torch.topk(dist, min(top_k, dist.shape[1] - 1), dim=1, largest=False, sorted=False)
+
+    @chain(device_in='gpu')
+    def cosine(self, x, y, abs=False, top_k=None):
+        """
+        :param abs: Hierarchical clustering wants [0 1], and dists.sort_by(0->1), but cosine is [-1 1]. Set True to
+            ensure cosine>0. Only needed currently for agglomorative()
+        """
+        if self.labels is None:
+            res = self._cosine(x, y, abs=abs)
+            if not top_k: return res
+
+        def fn(x_, k):
+            return self._cosine(x_, y, abs=abs, top_k=k)
+        return self._sims_by_clust(x, top_k, fn)
 
     @chain(device_in='cpu')
-    def ann(self, x, y, y_from_file=None, k=None, cluster_x=None):
+    def ann(self, x, y, y_from_file=None, top_k=None):
         """
         Adapted from https://github.com/UKPLab/sentence-transformers/blob/master/examples/applications/semantic_search_quora_hnswlib.py
         Finds top-k similar y similar embeddings to x.
         :param y_from_file: if provided, will attempt to load from this path. If fails, will train index & save to
             this path, to be loaded next time
-        :param k: how many results per x-row to return? If 1, just find closest match per row.
-        :param cluster_x: (None|agglomorative|kmeans). If specified, set k and it will find (n_in_cluster/k) per
+        :param top_k: how many results per x-row to return? If 1, just find closest match per row.
             cluster-mean
         """
+        import hnswlib
         if y is None: raise Exception("y required; it's the index you query")
         if y_from_file and os.path.exists(y_from_file):
             index = hnswlib.Index(space='cosine', dim=x.shape[1])
@@ -170,23 +210,16 @@ class Similars(object):
 
         # Controlling the recall by setting ef:
         # ef = 50
-        ef = max(k + 1, min(1000, index.get_max_elements()))
+        ef = max(top_k + 1, min(1000, index.get_max_elements()))
         index.set_ef(ef)  # ef should always be > top_k_hits
 
-        if not cluster_x:
+        def fn(x_, k):
             # We use hnswlib knn_query method to find the top_k_hits
-            idxs, distances = index.knn_query(x, k=k)
-            return idxs, distances
+            return index.knn_query(x_, top_k)
 
-        assert k, "k must be specified if using cluster_x"
-        clusters = Similars(x).normalize().cluster(algo=cluster_x).value()
-        idxs, distances = [], []
-        for l in range(clusters.max()):
-            k_ = (clusters == l).sum()//k
-            x_ = x[clusters == l].mean(0)
-            i, d = index.knn_query(x_, k=k_)
-            idxs.append(i);distances.append(d)
-        return np.vstack(idxs), np.vstack(distances)
+        if self.labels is None:
+            return fn(x, top_k)
+        return self._sims_by_clust(x, top_k, fn)
 
     def jensenshannon(self, x, y):
         # TODO ignores y for now, x expected to be square tf-idf matrix. Probably doesn't work currently
