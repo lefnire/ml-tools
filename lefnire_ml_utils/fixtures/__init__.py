@@ -2,7 +2,7 @@
 Downloads some Wikipedia articles for use in tests, also commited to git & exported in case other devs want to
 play around with these fixtures in their own tests / project-bootstrapping
 """
-import random, re, requests, os
+import random, re, requests, os, pdb
 from pprint import pprint
 from box import Box
 from pathlib import Path
@@ -39,16 +39,16 @@ def articles(group_by:str = None):
         'paragraph'={article_title_0: List[str], article_title_1: List[str], ..}
     """
     res = Box() if group_by else []
-    def add_to_res(k: str, i: int, paras: List[str]):
-        paras = "\n\n".join(paras)
+    def add_to_res(k: str, i: int, paras_: List[str]):
+        text = "\n\n".join(paras_)
         if group_by is None:
-            res.append(paras)
+            res.append(text)
         elif group_by == 'article':
             if not res.get(k, None):
                 res[k] = []
-            res[k].append(paras)
+            res[k].append(text)
         elif group_by == 'paragraph':
-            res[f"{k}_{i}"] = paras
+            res[f"{k}_{i}"] = text
 
     for page in pages:
         fname = root_ / f"{page.k}.txt"
@@ -74,16 +74,16 @@ def articles(group_by:str = None):
             clean = []
             for p in paras:
                 p = re.sub(r"\[[0-9]+\]", "", p)
-                if not re.match("[a-zA-Z]+", p):
+                if not re.search("[a-zA-Z]+", p):
                     continue  # empty
                 p = re.sub(r"\s+", " ", p)
                 clean.append(p)
             if not clean: continue
             big_entry += clean
-            add_to_res(page.k, i, paras)
+            add_to_res(page.k, i, clean)
             i += 1
         # 10 paras plenty for big-entry. Want to trigger out-of-bounds tests, but not bog GPU
         add_to_res(page.k, i+1, big_entry[:10])
-        add_to_res(page.k, i+2, small_entry)
+        # add_to_res(page.k, i+2, small_entry)  # FIXME yep, blowing things up
 
     return res

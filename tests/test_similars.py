@@ -1,19 +1,9 @@
-import pytest
+import pytest, pdb
 import numpy as np
 from lefnire_ml_utils import Similars, cleantext
+from lefnire_ml_utils.fixtures import articles
 
-corpus = ['A man is eating food.',
-          'A man is eating a piece of bread.',
-          'A man is eating pasta.',
-          'The girl is carrying a baby.',
-          'The baby is carried by the woman',
-          'A man is riding a horse.',
-          'A man is riding a white horse on an enclosed ground.',
-          'A monkey is playing drums.',
-          'Someone in a gorilla costume is playing a set of drums.',
-          'A cheetah is running behind its prey.',
-          'A cheetah chases prey on across a field.'
-          ] * 10
+corpus = articles()
 
 split_ = len(corpus)//3
 X, Y = corpus[:split_], corpus[split_:]
