@@ -160,8 +160,6 @@ class Similars(object):
         else:
             dist = 1. - sim
         if top_k is None: return dist
-        # See UKPLab/sentence_transformers/util.py#paraphrase_mining. We may want to switch to that,
-        # only reason I'm using custom code is `abs=True` (for agglomorative) which not supported there
         return torch.topk(dist, min(top_k, dist.shape[1] - 1), dim=1, largest=False, sorted=False)
 
     @chain(device_in='gpu')
@@ -169,6 +167,8 @@ class Similars(object):
         """
         :param abs: Hierarchical clustering wants [0 1], and dists.sort_by(0->1), but cosine is [-1 1]. Set True to
             ensure cosine>0. Only needed currently for agglomorative()
+        :param top_k: only return top-k smallest distances. If you cluster() before this cosine(), top_k is required.
+            It will return (n_docs_in_cluster/top_k) per cluster.
         """
         if self.labels is None:
             res = self._cosine(x, y, abs=abs)
