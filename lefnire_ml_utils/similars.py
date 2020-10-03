@@ -7,6 +7,8 @@ from sklearn.cluster import MiniBatchKMeans as KMeans
 from sentence_transformers import SentenceTransformer, util
 from typing import List, Union
 from sklearn.metrics import pairwise_distances, pairwise_distances_chunked
+from scipy.spatial.distance import jensenshannon
+from sklearn.feature_extraction.text import TfidfVectorizer
 from . import cleantext
 
 
@@ -215,7 +217,7 @@ class Similars(object):
 
         def fn(x_, k):
             # We use hnswlib knn_query method to find the top_k_hits
-            return index.knn_query(x_, top_k)
+            return index.knn_query(x_, k)
 
         if self.labels is None:
             return fn(x, top_k)
