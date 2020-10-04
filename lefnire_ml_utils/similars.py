@@ -267,6 +267,6 @@ class Similars(object):
         return self._split(labels, x, y) if cluster_both else labels
 
     @chain(device_in='cpu')
-    def autoencode(self, x, y, latent=80, save_load_path='/storage/autoencoder.tf', preserve=None):
+    def autoencode(self, x, y, latent=80, save_load_path=None, preserve_cosine=True):
         assert y is None, "Don't pass y into autoencode (FIXME)"
-        return autoencode(x, latent, save_load_path, preserve)
+        return autoencode(x, latent, save_load_path, preserve_cosine)

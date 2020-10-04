@@ -4,12 +4,14 @@ Copied from very old code, this won't work just yet. Need to fix up.
 
 import math, os, pdb
 import numpy as np
+import torch
 from tensorflow.keras import backend as K
 from tensorflow.keras.layers import Layer, Input, Dense, Lambda, Concatenate
 from tensorflow.keras.models import Model, load_model
 from tensorflow.keras.callbacks import EarlyStopping
 from tensorflow.keras.optimizers import Adam
 from sklearn.metrics import pairwise_distances_chunked, pairwise_distances
+from tqdm import tqdm
 
 def autoencode(
     x,
@@ -41,7 +43,7 @@ def autoencode(
     # tanh [-1 1] or sigmoid [0 1] to force normalized, in case downstream wants that. This makes most sense to me
     # elu just performs better, but no intuition
     encode_act = 'linear'  # 'sigmoid'
-    preserve_act = ('linear', 'mse')  # ('sigmoid', 'binary_cross_entropy')
+    dist_act = ('linear', 'mse')  # ('sigmoid', 'binary_cross_entropy')
 
     input_dim = x.shape[1]
     x_input = Input(shape=(input_dim,), name='x_input')
@@ -63,7 +65,7 @@ def autoencode(
     d_in = [x_input]
     d_out, e_out = [d_last], [e_last]
     if preserve_cosine:
-        dist_out = Dense(1, activation=preserve_act[0], name='dist_out')(d_last)
+        dist_out = Dense(1, activation=dist_act[0], name='dist_out')(d_last)
         d_in.append(x_other_input)
         d_out.append(dist_out)
     decoder = Model(d_in, d_out)
@@ -71,10 +73,10 @@ def autoencode(
 
     loss, loss_weights = {'decoder_out': 'mse'}, {'decoder_out': 1.}
     if preserve_cosine:
-        loss['dist_out'] = preserve_act[1]
+        loss['dist_out'] = dist_act[1]
         loss_weights['dist_out'] = 1.
     decoder.compile(
-        # metrics=['accuracy'],
+        metrics=loss,
         loss=loss,
         loss_weights=loss_weights,
         optimizer=Adam(learning_rate=.0001),
@@ -83,19 +85,19 @@ def autoencode(
 
     ###
     # Train model
-    np.random.shuffle(x)  # shuffle all data first, since validation_split happens before shuffle
+    # np.random.shuffle(x)  # shuffle all data first, since validation_split happens before shuffle
 
     shuffle = np.arange(x.shape[0])
     np.random.shuffle(shuffle)
 
     if preserve_cosine:
-        print("Calc distances")
+        print("AE: calc pairwise_distances_chunked")
+        x_t = torch.tensor(x)
         dists = []
-        pdc = pairwise_distances_chunked(x, metric='cosine', working_memory=64)
-        for i, chunk in enumerate(pdc):
-            sz = chunk.shape[0]
-            start, stop = i * sz, (i + 1) * sz
-            dist = chunk[np.arange(sz), shuffle[start:stop]]
+        for i, j in tqdm(zip(np.arange(x.shape[0]), shuffle)):
+            sim = torch.mm(x_t[i:i+1], x_t[j:j+1].T).cpu()
+            # see abs() in similars.py, reconsider. Might not even matter how sim/dist is represented?
+            dist = (sim - 1).abs()
             dists.append(dist)
         dists = np.concatenate(dists)
 
