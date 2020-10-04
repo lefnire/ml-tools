@@ -1,9 +1,9 @@
 Various ML utilities I use in most of my projects. Includes:
 
 * Text cleanup & similarity methods using Spacy + lemmatization, TF-IDF or BERT embeddings, cosine / Jensen-Shannon 
-* Basic AutoEncoder (Keras, code coming soon)
+* Basic AutoEncoder
 * XGBoost hyper-optimization & feature_importances_ extraction (coming soon)
-* BERT utils, like batch-chunking multiple docs to GPU only what fits
+* BERT utils, like batch-chunking multiple docs to GPU only what fits (coming soon)
 
 No modules are installed for you, see https://github.com/lefnire/blob/master/gnothi/gpu.dockerfile for modules I'm using. I'll fix this.
 
@@ -54,4 +54,24 @@ assert len(clusters[0]) == len(sentences_a)
 assert len(clusters[1]) == len(sentences_b)
 # cluster vectors, I'm not using NLP at all
 clusters = Similars(vecs).normalize().cluster().value()
+```
+
+The Keras Autoencoder is very valuable for dimensionality reduction, which makes downstream clustering, cosine similarity, etc; simpler, faster, and more accurate.
+
+```python
+# see autoencode() signature for options.
+chain = Similars(sentences).embed().autoencode().value()
+
+# My recommendation is to grab a huge corpus List[str], train the autoencoder once, then use that in teh future to 
+# to dim-reduce all embeddings 
+save_load_path = '/storage/ae.tf'
+corpus = Similars(sentences_a).embed().autoencode(save_load_path=save_load_path)
+# Now you have a trained model at that path
+x = Similars(sentences_b).embed().autoencode(save_load_path=save_load_path).value()
+dists = Similars(x, corpus).cosine().value()
+# Kmeans works much better with dim-reduced data
+clusters = Similars(x).cluster(algo='kmeans').value()
+
+# Note, you don't need to normalize() before using autoencode. See the function's signature (eg batch_norm). The 
+# embeddings will be normalized, so it both learns to reduce, and normalize (helping downstream tasks) 
 ```
