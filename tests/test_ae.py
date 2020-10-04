@@ -6,9 +6,8 @@ corpus = articles()
 def test_ae():
     chain = Similars(corpus).embed().normalize()
     vecs = chain.value()
-    dists = chain.cosine().value()
     dim = 20
-    reduced = chain.autoencode(latent=dim, preserve=dists).value()
+    reduced = chain.autoencode(latent=dim, preserve_cosine=True).value()
     assert vecs.shape[0] == reduced.shape[0]
     assert reduced.shape[1] == dim
 
