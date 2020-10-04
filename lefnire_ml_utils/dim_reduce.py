@@ -11,44 +11,26 @@ from keras.models import Model, load_model
 from keras.callbacks import EarlyStopping
 from keras.optimizers import Adam
 from sklearn import preprocessing as pp
-from sklearn_extra.cluster import KMedoids
-from sklearn.cluster import KMeans
-from sklearn.cluster import AgglomerativeClustering
-from scipy.spatial.distance import cdist
 from sklearn.metrics import pairwise_distances_chunked, pairwise_distances
-from jwtauthtest.cleantext import Clean
-from kneed import KneeLocator
 
-class Clusterer():
+class AE():
     model_path = 'tmp/ae.tf'
-    DEFAULT_NCLUST = 20
 
     def __init__(self,
-        ae=False,
-        n_clusters=None,
-        with_topics=False,
         input_dim=768,
         latent=20,
-        # dot preserves topology; cosine preserves angle distances; None is raw AE. Based on your downstream clusterer
-        preserve='cosine',  # dot|cosine|None,
-        clusterer='agglomorative'  # kmedoids|kmeans|agglomorative
+        preserve_cosine=False  # Reduce embeddings while trying to maintain their cosine similarities
     ):
         K.clear_session()
-        self.n_clusters = n_clusters or self.DEFAULT_NCLUST
-        self.ae = ae
-        self.with_topics = with_topics
         self.input_dim = input_dim
         self.latent = latent
-        self.preserve = preserve
-        self.clusterer = clusterer
+        self.preserve_cosine = preserve_cosine
 
         self.loaded = False
         self.init_model()
         self.load()
 
     def init_model(self):
-        if not self.ae: return
-
         x_input = Input(shape=(self.input_dim,), name='x_input')
         e1 = Dense(500, activation='elu')(x_input)
         e2 = Dense(150, activation='elu')(e1)
@@ -58,7 +40,7 @@ class Clusterer():
         e3 = Dense(self.latent, activation='tanh')(e2)
         e_last = e3
 
-        if self.preserve:
+        if self.preserve_cosine:
             x_other_input = Input(shape=(self.input_dim,), name='x_other_input')
             merged = concatenate([e_last, x_other_input])
         else:
@@ -70,24 +52,17 @@ class Clusterer():
 
         d_in = [x_input]
         d_out, e_out = [d_last], [e_last]
-        if self.preserve:
+        if self.preserve_cosine:
             dist_out = Dense(1, activation='sigmoid', name='dist_out')(d_last)
             d_in.append(x_other_input)
             d_out.append(dist_out)
-        if self.with_topics:
-            topic_out = Dense(self.n_clusters, activation='softmax', name='topic_out')(e_last)
-            d_out.append(topic_out)
-            e_out.append(topic_out)
         decoder = Model(d_in, d_out)
         encoder = Model(x_input, e_out)
 
         loss, loss_weights = {'decoder_out': 'mse'}, {'decoder_out': 1.}
-        if self.preserve:
+        if self.preserve_cosine:
             loss['dist_out'] = 'binary_crossentropy'
             loss_weights['dist_out'] = 1.
-        if self.with_topics:
-            loss['topic_out'] = 'categorical_crossentropy'
-            loss_weights['topic_out'] = .4  # value of 2-3 common
         decoder.compile(
             # metrics=['accuracy'],
             loss=loss,
@@ -98,25 +73,14 @@ class Clusterer():
 
         self.decoder, self.encoder = decoder, encoder
 
-    def _print_dists(self, dists):
-        # wanna make sure our distances are normalized after xyz
-        print('dists.min', dists.min(), 'dists.max', dists.max())
-
-    def fit(self, x, texts=None):
-        if not self.ae: return
-
-        x = pp.normalize(x)
+    def fit(self, x):
+        # x = pp.normalize(x)  # assumed to be done before this via chain.normalize()
         np.random.shuffle(x)  # shuffle all data first, since validation_split happens before shuffle
 
         shuffle = np.arange(x.shape[0])
         np.random.shuffle(shuffle)
 
-        if self.preserve == 'dot':
-            # dot product fast & intuitive, but too hard to optimize
-            dists = np.array([ np.dot(x[i], x[shuffle[i]]) for i in range(x.shape[0]) ])
-            self._print_dists(dists)
-            dists = pp.minmax_scale(dists)
-        if self.preserve == 'cosine':
+        if self.preserve_cosine:
             print("Calc distances")
             dists = []
             pdc = pairwise_distances_chunked(x, metric='cosine', working_memory=64)
@@ -127,18 +91,14 @@ class Clusterer():
                 dists.append(dist)
             # cosine values bw [-1 1], no loss function for that (well, mse..) Scale to [0 1] and use binary_xentropy
             dists = np.concatenate(dists)
-            self._print_dists(dists)
             dists = pp.minmax_scale(dists) # (dists + 1) / 2
 
         # https://wizardforcel.gitbooks.io/deep-learning-keras-tensorflow/content/8.2%20Multi-Modal%20Networks.html
         inputs = {'x_input': x}
         outputs = {'decoder_out': x}
-        if self.preserve:
+        if self.preserve_cosine:
             inputs['x_other_input'] = x[shuffle]
             outputs['dist_out'] = dists
-        if self.with_topics:
-            topics = Clean.lda_topics(texts, default_n_topics=self.DEFAULT_NCLUST)
-            outputs['topic_out'] = topics
 
         es = EarlyStopping(monitor='val_loss', mode='min', patience=3, min_delta=.0001)
         self.decoder.fit(
@@ -154,9 +114,6 @@ class Clusterer():
         self.decoder.save_weights(self.model_path)
 
     def load(self):
-        if not self.ae:
-            self.loaded = True
-            return
         if os.path.exists(self.model_path + '.index'):
             self.decoder.load_weights(self.model_path)
             self.loaded = True
