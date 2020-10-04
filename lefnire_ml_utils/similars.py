@@ -10,7 +10,7 @@ from sklearn.metrics import pairwise_distances, pairwise_distances_chunked
 from scipy.spatial.distance import jensenshannon
 from sklearn.feature_extraction.text import TfidfVectorizer
 from . import cleantext
-
+from .dim_reduce import autoencode
 
 # https://stackoverflow.com/a/7590709/362790
 def chain(device_in=None):
@@ -265,3 +265,8 @@ class Similars(object):
         else:
             raise Exception("Other clusterers not yet supported (use kmeans|agglomorative)")
         return self._split(labels, x, y) if cluster_both else labels
+
+    @chain(device_in='cpu')
+    def autoencode(self, x, y, latent=80, save_load_path='/storage/autoencoder.tf', preserve=None):
+        assert y is None, "Don't pass y into autoencode (FIXME)"
+        return autoencode(x, latent, save_load_path, preserve)
