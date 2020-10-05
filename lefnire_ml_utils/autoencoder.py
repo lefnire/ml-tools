@@ -102,7 +102,7 @@ def autoencode_(x, dims, filename, batch_norm):
             # the loss is internal (cos(emb) v cos(orig)), so pass in junk which is ignored (y_true required)
             dist=np.zeros(x.shape[0])
         ),
-        epochs=50,
+        epochs=30,
         batch_size=128,
         shuffle=True,
         callbacks=[es],

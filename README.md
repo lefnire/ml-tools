@@ -1,5 +1,6 @@
-Various ML utilities I use in most of my projects. Includes:
+Various ML utilities I use in most of my projects. Includes
 
+* Dockerfiles
 * Text cleanup & similarity methods using Spacy + lemmatization, TF-IDF or BERT embeddings, cosine / Jensen-Shannon 
 * Basic AutoEncoder
 * XGBoost hyper-optimization & feature_importances_ extraction (coming soon)
