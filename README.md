@@ -1,14 +1,19 @@
 Various ML utilities I use in most of my projects. Includes
 
-* Dockerfiles
-* Text cleanup & similarity methods using Spacy + lemmatization, TF-IDF or BERT embeddings, cosine / Jensen-Shannon 
-* Basic AutoEncoder
-* XGBoost hyper-optimization & feature_importances_ extraction (coming soon)
-* BERT utils, like batch-chunking multiple docs to GPU only what fits (coming soon)
+* Dockerfiles ([Dockerhub](https://github.com/lefnire/ml-tools/tags))
+  1. `cuda101-py38.dockerfile`: CUDA 10.1, CuDNN 7, Python 3.8 (Miniconda). I've had trouble getting Python>3.6 with Tensorflow, so I made this to address that issue.
+  1. `transformers-pt.dockerfile`: (1), Transformers, Sentence Transformers, Pytorch
+  1. `transformers-pt-tf.dockerfile`: (1), (2), Tensorflow
+  1. `Dockerfile`: (1-3), packages needed to run samples in this repo. So start with that Dockerfile to play with this project. 
+* NLP
+  * Text cleanup & similarity methods using Spacy + lemmatization, TF-IDF or BERT embeddings, cosine / Jensen-Shannon 
+  * AutoEncoder
+  * BERT utils, like batch-chunking multiple docs to GPU only what fits (coming soon)
+* Other
+  * XGBoost hyper-optimization & feature_importances_ extraction (coming soon)
+  
+No PyPI yet, do `pip install git+git://github.com/lefnire/ml_tools.git`. And no modules installed via that command, see `./Dockerfile` to get started.
 
-No modules are installed for you, see https://github.com/lefnire/blob/master/gnothi/gpu.dockerfile for modules I'm using. I'll fix this.
-
-No PyPI yet, do `pip install git+git://github.com/lefnire/lefnire_ml_utils.git`
 
 ## Similars
 Handy NLP utility for performing various text-cleanup, vectorization, & similarity methods. Meant for passing in lists of strings, but can be used just for the vector utilities (similarity methods, etc). 
@@ -16,7 +21,7 @@ Handy NLP utility for performing various text-cleanup, vectorization, & similari
 `Similars()` is a chainer pattern, so each step you call returns another instance of itself so you can grab intermediate values along the way and then keep going. Call `.value()` when you want intermediate values. See `similars.py` for the details, but this is what it looks like:
 
 ```python
-from lefnire_ml_utils import Similars, cleantext
+from ml_tools import Similars, cleantext
 
 chain = Similars(sentences)
 

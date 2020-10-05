@@ -1,4 +1,4 @@
-from lefnire_ml_utils.fixtures import articles
+from ml_tools.fixtures import articles
 
 
 def test_group_none():

@@ -1,7 +1,7 @@
 import pytest, pdb
 import numpy as np
-from lefnire_ml_utils import Similars, cleantext
-from lefnire_ml_utils.fixtures import articles
+from ml_tools import Similars, cleantext
+from ml_tools.fixtures import articles
 
 corpus = articles()
 

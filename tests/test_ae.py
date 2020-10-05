@@ -1,5 +1,5 @@
-from lefnire_ml_utils import Similars
-from lefnire_ml_utils.fixtures import articles
+from ml_tools import Similars
+from ml_tools.fixtures import articles
 
 corpus = articles()
 

@@ -1,4 +1,4 @@
-FROM lefnire/ml-tools:cuda101-py38-0.0.2
+FROM lefnire/ml-tools:cuda101-py38-0.0.1
 
 RUN \
   pip install --no-cache-dir torch==1.6.0+cu101 torchvision==0.7.0+cu101 -f https://download.pytorch.org/whl/torch_stable.html &&\

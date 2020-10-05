@@ -1,7 +1,4 @@
-FROM lefnire/ml-tools:transformers-pt-tf-0.0.2
-
-# TODO switch to mysql-python-connector & remove apt-get
-RUN apt-get install -y default-libmysqlclient-dev
+FROM lefnire/ml-tools:transformers-pt-tf-0.0.1
 
 RUN \
   pip install --no-cache-dir spacy && python -m spacy download en_core_web_sm && \
