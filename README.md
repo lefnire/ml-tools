@@ -70,12 +70,12 @@ chain = Similars(sentences).embed().autoencode().value()
 
 # My recommendation is to grab a huge corpus List[str], train the autoencoder once, then use that in teh future to 
 # to dim-reduce all embeddings 
-save_load_path = '/storage/ae.tf'
-corpus = Similars(sentences_a).embed().autoencode(save_load_path=save_load_path)
+fname = '/storage/ae.tf'
+corpus = Similars(sentences_a).embed().autoencode(filename=fname)
 # Now you have a trained model at that path
-x = Similars(sentences_b).embed().autoencode(save_load_path=save_load_path).value()
-dists = Similars(x, corpus).cosine().value()
-# Kmeans works much better with dim-reduced data
+x = Similars(sentences_b).embed().autoencode(filename=fname).value()
+# Kmeans/euclidean works better than agglom/cosine after dim-reduction
+dists = Similars(x, corpus).cdist().value()
 clusters = Similars(x).cluster(algo='kmeans').value()
 
 # Note, you don't need to normalize() before using autoencode. See the function's signature (eg batch_norm). The 
