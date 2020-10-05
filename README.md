@@ -4,7 +4,8 @@ Various ML utilities I use in most of my projects. Includes
   1. `cuda101-py38.dockerfile`: CUDA 10.1, CuDNN 7, Python 3.8 (Miniconda). I've had trouble getting Python>3.6 with Tensorflow, so I made this to address that issue.
   1. `transformers-pt.dockerfile`: (1), Transformers, Sentence Transformers, Pytorch
   1. `transformers-pt-tf.dockerfile`: (1), (2), Tensorflow
-  1. `Dockerfile`: (1-3), packages needed to run samples in this repo. So start with that Dockerfile to play with this project. 
+  1. `ml-tools.dockerfile`: (1-3), packages needed for this project
+  1. `./Dockerfile`: (1-4), not published to hub; clone/run repo with this Dockerfile to play with code 
 * NLP
   * Text cleanup & similarity methods using Spacy + lemmatization, TF-IDF or BERT embeddings, cosine / Jensen-Shannon 
   * AutoEncoder
