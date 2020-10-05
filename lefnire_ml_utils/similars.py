@@ -6,11 +6,13 @@ from kneed import KneeLocator
 from sklearn.cluster import MiniBatchKMeans as KMeans
 from sentence_transformers import SentenceTransformer, util
 from typing import List, Union
-from sklearn.metrics import pairwise_distances, pairwise_distances_chunked
+from sklearn.metrics import pairwise_distances
 from scipy.spatial.distance import jensenshannon
 from sklearn.feature_extraction.text import TfidfVectorizer
 from . import cleantext
 from .dim_reduce import autoencode
+from sklearn.decomposition import PCA
+from scipy.spatial.distance import cdist
 
 # https://stackoverflow.com/a/7590709/362790
 def chain(device_in=None):
@@ -103,29 +105,34 @@ class Similars(object):
         return self._split(enco, x, y)
 
     @chain()
-    def dim_reduce(self, x, y, method='autoencoder'):
-        """
-        :param method: autoencoder|pca|tsne
-        """
-        raise Exception("dim_reduce not yet implemented. I'll add basic AutoEncoder soon")
+    def pca(self, x, y, **kwargs):
+        v = self._join(x, y)
+        v = PCA(**kwargs).fit_transform(v)
+        return self._split(v, x, y)
 
     @chain()
     def cleantext(self, x, y, methods=[cleantext.keywords]):
-        combo = self._join(x, y)
-        combo = cleantext.multiple(combo, methods)
-        return self._split(combo, x, y)
+        v = self._join(x, y)
+        v = cleantext.multiple(v, methods)
+        return self._split(v, x, y)
 
     @chain()
     def tf_idf(self, x, y):
-        combo = self._join(x, y)
-        combo = TfidfVectorizer().fit_transform(combo)
-        return self._split(combo, x, y)
+        v = self._join(x, y)
+        v = TfidfVectorizer().fit_transform(v)
+        return self._split(v, x, y)
 
     @chain(device_in='gpu')
-    def normalize(self, x, y):
-        norm = self._join(x, y)
-        norm = norm / norm.norm(dim=1)[:, None]
-        return self._split(norm, x, y)
+    def normalize(self, x, y, dim=0):
+        """
+        Normalize x & y. All the online examples normalize axis 1 (normalize each row), but that doesn't make any
+        sense to me.. each column in an embedding represents something, and IMO that should be normalized? So here
+        you choose. dim=0, x + y get combined (for more feature-distribution-awareness) then split back. dim=1
+        acts like usual online examples.
+        """
+        v = self._join(x, y)
+        v = v.norm(dim=dim, keepdim=True)
+        return self._split(v, x, y)
 
     @staticmethod
     def _unsqueeze(t):
@@ -179,6 +186,10 @@ class Similars(object):
         def fn(x_, k):
             return self._cosine(x_, y, abs=abs, top_k=k)
         return self._sims_by_clust(x, top_k, fn)
+
+    @chain(device_in='cpu')
+    def cdist(self, x, y, **kwargs):
+        return cdist(x, y, **kwargs)
 
     @chain(device_in='cpu')
     def ann(self, x, y, y_from_file=None, top_k=None):
@@ -267,6 +278,6 @@ class Similars(object):
         return self._split(labels, x, y) if cluster_both else labels
 
     @chain(device_in='cpu')
-    def autoencode(self, x, y, dims=[500,150,20], save_load_path=None, preserve_cosine=True, batch_norm=False):
+    def autoencode(self, x, y, dims=[500,150,20], filename=None, preserve='cosine', batch_norm=True):
         assert y is None, "Don't pass y into autoencode (FIXME)"
-        return autoencode(x, dims, save_load_path, preserve_cosine, batch_norm)
+        return autoencode(x, dims, filename, preserve, batch_norm)
