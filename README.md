@@ -1,6 +1,6 @@
 Various ML utilities I use in most of my projects. Includes
 
-* Dockerfiles ([Dockerhub](https://github.com/lefnire/ml-tools/tags))
+* Dockerfiles ([Dockerhub](https://hub.docker.com/repository/docker/lefnire/ml-tools))
   1. `cuda101-py38.dockerfile`: CUDA 10.1, CuDNN 7, Python 3.8 (Miniconda). I've had trouble getting Python>3.6 with Tensorflow, so I made this to address that issue.
   1. `transformers-pt.dockerfile`: (1), Transformers, Sentence Transformers, Pytorch
   1. `transformers-pt-tf.dockerfile`: (1), (2), Tensorflow
