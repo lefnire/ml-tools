@@ -10,7 +10,7 @@ from sklearn.metrics import pairwise_distances
 from scipy.spatial.distance import jensenshannon
 from sklearn.feature_extraction.text import TfidfVectorizer
 from . import cleantext
-from .dim_reduce import autoencode
+from .autoencoder import autoencode
 from sklearn.decomposition import PCA
 from scipy.spatial.distance import cdist
 
@@ -123,7 +123,7 @@ class Similars(object):
         return self._split(v, x, y)
 
     @chain(device_in='gpu')
-    def normalize(self, x, y, dim=0):
+    def normalize(self, x, y, dim=1):
         """
         Normalize x & y. All the online examples normalize axis 1 (normalize each row), but that doesn't make any
         sense to me.. each column in an embedding represents something, and IMO that should be normalized? So here
@@ -278,6 +278,6 @@ class Similars(object):
         return self._split(labels, x, y) if cluster_both else labels
 
     @chain(device_in='cpu')
-    def autoencode(self, x, y, dims=[500,150,20], filename=None, preserve='cosine', batch_norm=True):
+    def autoencode(self, x, y, dims=[500,150,20], filename=None, batch_norm=True):
         assert y is None, "Don't pass y into autoencode (FIXME)"
-        return autoencode(x, dims, filename, preserve, batch_norm)
+        return autoencode(x, dims, filename, batch_norm)
