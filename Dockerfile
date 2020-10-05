@@ -1,4 +1,4 @@
-FROM lefnire/ml-tools:transformers-pt-tf-0.0.2
+FROM lefnire/ml-tools:transformers-pt-tf-0.0.3
 
 RUN \
   pip install --no-cache-dir spacy && python -m spacy download en_core_web_sm && \
