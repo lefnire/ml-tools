@@ -28,7 +28,7 @@ def autoencode_(x, dims, filename, batch_norm):
     # tanh/sigmoid + (mse?)/binary_cross_entropy: constrain output to [-1 1] / [0 1]. Esp. useful if using output in
     #   downstream tasks like cosine() or DNN which want normalized outputs.
     # elu + mse: seems to perform best, but I don't have intuition
-    encode_act = 'relu'
+    encode_act = 'tanh'
     dist_act = 'sigmoid'
     act = 'relu'
 
@@ -79,8 +79,8 @@ def autoencode_(x, dims, filename, batch_norm):
         dist=dist_loss
     )
     # loss_weights = {'decoder': 1., 'dist': 1.}
-    # BatchNormalization allows much higher learning rates. Experiment bumping even more!
-    lr = .001 if batch_norm else .0001
+    # BatchNormalization allows much higher learning rates.
+    lr = .001 if batch_norm else .0003
     full.compile(
         metrics=loss,
         loss=loss,
@@ -102,7 +102,7 @@ def autoencode_(x, dims, filename, batch_norm):
             # the loss is internal (cos(emb) v cos(orig)), so pass in junk which is ignored (y_true required)
             dist=np.zeros(x.shape[0])
         ),
-        epochs=30,
+        epochs=50,
         batch_size=128,
         shuffle=True,
         callbacks=[es],

@@ -123,15 +123,9 @@ class Similars(object):
         return self._split(v, x, y)
 
     @chain(device_in='gpu')
-    def normalize(self, x, y, dim=1):
-        """
-        Normalize x & y. All the online examples normalize axis 1 (normalize each row), but that doesn't make any
-        sense to me.. each column in an embedding represents something, and IMO that should be normalized? So here
-        you choose. dim=0, x + y get combined (for more feature-distribution-awareness) then split back. dim=1
-        acts like usual online examples.
-        """
+    def normalize(self, x, y):
         v = self._join(x, y)
-        v = v.norm(dim=dim, keepdim=True)
+        v = v / v.norm(dim=1)[:, None]
         return self._split(v, x, y)
 
     @staticmethod
