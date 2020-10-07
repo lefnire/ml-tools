@@ -98,7 +98,7 @@ class Similars(object):
     def embed(self, x: List[str], y: List[str]=None):
         enco = SentenceTransformer('roberta-base-nli-stsb-mean-tokens').encode(
             self._join(x, y),
-            batch_size=16,
+            batch_size=32,
             show_progress_bar=True,
             convert_to_tensor=True
         )
@@ -190,12 +190,16 @@ class Similars(object):
         """
         Adapted from https://github.com/UKPLab/sentence-transformers/blob/master/examples/applications/semantic_search_quora_hnswlib.py
         Finds top-k similar y similar embeddings to x.
+        Make sure you call .normalize() before this step!
         :param y_from_file: if provided, will attempt to load from this path. If fails, will train index & save to
             this path, to be loaded next time
         :param top_k: how many results per x-row to return? If 1, just find closest match per row.
             cluster-mean
         """
-        import hnswlib
+        try:
+            import hnswlib
+        except:
+            raise Exception("hnswlib not installed; install it manually yourself via `pip install hnswlib`")
         if y is None: raise Exception("y required; it's the index you query")
         if y_from_file and os.path.exists(y_from_file):
             index = hnswlib.Index(space='cosine', dim=x.shape[1])
@@ -228,9 +232,12 @@ class Similars(object):
             return fn(x, top_k)
         return self._sims_by_clust(x, top_k, fn)
 
+    @chain(device_in='cpu')
     def jensenshannon(self, x, y):
-        # TODO ignores y for now, x expected to be square tf-idf matrix. Probably doesn't work currently
-        return pairwise_distances(x, metric=jensenshannon)
+        if y is None:
+            return pairwise_distances(x, metric=jensenshannon)
+        else:
+            return cdist(x, y, metric='jensenshannon')
 
     def _default_n_clusters(self, x):
         return math.floor(1 + 3.5 * math.log10(x.shape[0]))

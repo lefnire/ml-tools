@@ -17,5 +17,4 @@ RUN \
   kneed \
   tqdm \
   textacy \
-  pytest \
-  hnswlib
+  pytest
