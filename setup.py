@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="ml_tools",
-    version="0.0.2",
+    version="0.0.5",
     author="Tyler Renelle",
     author_email="tylerrenelle@gmail.com",
     description="Various ML tools.",

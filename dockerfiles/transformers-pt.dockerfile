@@ -1,4 +1,4 @@
-FROM lefnire/ml-tools:cuda101-py38-0.0.3
+FROM lefnire/ml-tools:cuda101-py38-0.0.5
 
 RUN pip install --no-cache-dir \
   mkl \

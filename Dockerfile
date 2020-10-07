@@ -1,4 +1,4 @@
-FROM lefnire/ml-tools:ml-tools-0.0.3
+FROM lefnire/ml-tools:ml-tools-0.0.5
 
 COPY . /app
 WORKDIR /app
