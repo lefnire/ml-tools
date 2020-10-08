@@ -44,3 +44,40 @@ def test_normalize(fmt, coverage, mode):
     print(chain.data.lemmas[:5])
     assert len(clean) > 10
     print(clean[0])
+
+@pytest.mark.parametrize("content", [
+    "hello",
+
+    "# test",
+
+    """# Markdown Title
+    Here is a list of items
+    * list item 1
+    * list item 2
+    
+    ## Next section
+    This is a paragraph. Blah bla blah.
+    """,
+])
+def test_unmark(content):
+    res = CleanText(content).unmark().value()
+    print(res)
+    assert type(res) == str
+    assert "#" not in res
+    assert "*" not in res
+
+
+@pytest.mark.parametrize("content", [
+    "hello",
+
+    "<span>test</span>",
+
+    """<html>
+    <body><p>Test string</p></body>
+    </html>"""
+])
+def test_strip_html(content):
+    res = CleanText([content]).strip_html().value()
+    print(res)
+    assert type(res) == str
+    assert "<" not in res

@@ -10,10 +10,6 @@ from textacy.preprocessing import replace as treplace
 from typing import List
 import logging
 
-# Markdown helpers
-from markdownify import markdownify  # html2md
-import markdown  # md2txt
-
 logger = logging.getLogger(__name__)
 
 from stanza.resources.common import DEFAULT_MODEL_DIR
@@ -68,9 +64,29 @@ def resub(pattern, replace_with, txt):
     return re.sub(pattern, replace_with, txt, flags=re.IGNORECASE)
 
 
+# https://stackoverflow.com/a/54923798/362790
+from markdown import Markdown
+from io import StringIO
+from markdownify import markdownify  # html2md
+def __unmark_element(element, stream=None):
+    if stream is None:
+        stream = StringIO()
+    if element.text:
+        stream.write(element.text)
+    for sub in element:
+        __unmark_element(sub, stream)
+    if element.tail:
+        stream.write(element.tail)
+    return stream.getvalue()
+# patching Markdown
+Markdown.output_formats["plain"] = __unmark_element
+__md = Markdown(output_format="plain")
+__md.stripTopLevelTags = False
+
+
 def md2txt(s):
-    html_ = markdown.markdown(s)
-    return html2txt(html_)
+    # return html2txt(md.convert(s))
+    return __md.convert(s)
 
 
 def html2md(s):
@@ -83,10 +99,9 @@ def html2txt(s):
     return BeautifulSoup(s, "html5lib").text
 
 
-def one_or_many(chain=True, batch=False, keep=None):
+def one_or_many(batch=False, keep=None):
     """
     Wraps each cleantext method so you can pass in either a single string or list.
-    :param chain: if True, hains calls, like CleanText(sentences).strip_html().keywords().value().
     :param batch: True if a method expects to process all docs together (eg, lemmatization)
     :param keep: A string key for saving away intermediate values for access later on `.data`. If used,
         method should return a tuple (result, thing_to_keep). Eg, for lemmatization, it returns the lemmatized text
@@ -101,8 +116,6 @@ def one_or_many(chain=True, batch=False, keep=None):
             txt = [t or "empty document" for t in txt]
             txt = fn(self, txt, *args, **kwargs) if batch\
                 else  [fn(self, s, *args, **kwargs) for s in txt]
-            if not chain:
-                return txt
 
             data = self.data
             if keep:
