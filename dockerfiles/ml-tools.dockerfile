@@ -1,7 +1,6 @@
 FROM lefnire/ml-tools:transformers-pt-tf-0.0.5
 
 RUN \
-  pip install --no-cache-dir spacy && python -m spacy download en_core_web_sm && \
   pip install --no-cache-dir \
   python-box \
   pandas \
@@ -10,11 +9,11 @@ RUN \
   gensim \
   beautifulsoup4 \
   markdown \
-  lemminflect \
   scipy \
   html5lib \
   hyperopt \
   kneed \
   tqdm \
   textacy \
-  pytest
+  pytest \
+  spacy-stanza

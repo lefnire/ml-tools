@@ -9,36 +9,46 @@ from typing import List, Union
 from sklearn.metrics import pairwise_distances
 from scipy.spatial.distance import jensenshannon
 from sklearn.feature_extraction.text import TfidfVectorizer
-from . import cleantext
 from .autoencoder import autoencode
 from sklearn.decomposition import PCA
 from scipy.spatial.distance import cdist
+from box import Box
 
 # https://stackoverflow.com/a/7590709/362790
-def chain(device_in=None):
+def chain(device_in=None, keep=None, together=False):
     """
     Decorator for chaining methods in Similars like Similars(x, y).embed().normalize().cosine()
     When you want the output at any step, call .value(). It will retain its intermediate step
     so you can continue chaining later, and call subsequent .value()
     :param device_in: gpu|cpu|None. What device does this chain-step expect its values from?
+    :param keep: keep data across chains by this key. chain.data[key]
+    :param together: whether to process x & y as a whole, then split back apart (eg, tf-idf)
     """
     def decorator(fn):
         def wrapper(self, *args, **kwargs):
             # Place x,y on device this chain method expects
             x, y = self.get_values(device_in)
-            res = fn(self, x, y, *args, **kwargs)
+            x_y = (self._join(x, y),) if together else (x, y)
+            res = fn(self, *x_y, *args, **kwargs)
+
+            data = self.data
+            if keep:
+                data[keep] = res[-1]
+                res = res[0]
+
+            if together:
+                res = self._split(res, x, y)
+
             # Always maintain [x, y] for consistency
             if type(res) != list: res = [res, None]
             # Save intermediate result, and chained methods can continue
-            last_fn = fn.__name__
-            if last_fn == 'cluster':
-                return Similars(x, y, last_fn=last_fn, labels=res)
-            return Similars(*res, last_fn=last_fn)
+
+            return Similars(*res, last_fn=fn.__name__, data=data)
         return wrapper
     return decorator
 
 
-class Similars(object):
+class Similars:
     """
     Various similarity helper functions.
 
@@ -56,16 +66,15 @@ class Similars(object):
         self,
         x: Union[List[str], np.ndarray],
         y: Union[List[str], np.ndarray] = None,
-        last_fn: str = None,
-        labels: List[np.ndarray] = None
+        last_fn = None,
+        data=Box(default_box=True, default_box_attr=None)
     ):
         self.result = [x, y]
         self.last_fn = last_fn
-        self.labels = labels
+        self.data = data
 
     def value(self):
-        x, y = self.labels if self.last_fn == 'cluster'\
-            else self.get_values('cpu')
+        x, y = self.get_values('cpu')
         if y is None: return x
         return [x, y]
 
@@ -94,39 +103,26 @@ class Similars(object):
         at = len(x) if type(x) == list else x.shape[0]
         return [joined[:at], joined[at:]]
 
-    @chain()
-    def embed(self, x: List[str], y: List[str]=None):
-        enco = SentenceTransformer('roberta-base-nli-stsb-mean-tokens').encode(
-            self._join(x, y),
-            batch_size=32,
+    @chain(together=True)
+    def embed(self, both: List[str], batch_size=32):
+        return SentenceTransformer('roberta-base-nli-stsb-mean-tokens').encode(
+            both,
+            batch_size=batch_size,
             show_progress_bar=True,
             convert_to_tensor=True
         )
-        return self._split(enco, x, y)
 
-    @chain()
-    def pca(self, x, y, **kwargs):
-        v = self._join(x, y)
-        v = PCA(**kwargs).fit_transform(v)
-        return self._split(v, x, y)
+    @chain(together=True)
+    def pca(self, both, **kwargs):
+        return PCA(**kwargs).fit_transform(both)
 
-    @chain()
-    def cleantext(self, x, y, methods=[cleantext.keywords]):
-        v = self._join(x, y)
-        v = cleantext.multiple(v, methods)
-        return self._split(v, x, y)
+    @chain(together=True)
+    def tf_idf(self, both):
+        return TfidfVectorizer().fit_transform(both)
 
-    @chain()
-    def tf_idf(self, x, y):
-        v = self._join(x, y)
-        v = TfidfVectorizer().fit_transform(v)
-        return self._split(v, x, y)
-
-    @chain(device_in='gpu')
-    def normalize(self, x, y):
-        v = self._join(x, y)
-        v = v / v.norm(dim=1)[:, None]
-        return self._split(v, x, y)
+    @chain(device_in='gpu', together=True)
+    def normalize(self, both):
+        return both / both.norm(dim=1)[:, None]
 
     @staticmethod
     def _unsqueeze(t):
@@ -136,7 +132,7 @@ class Similars(object):
     def _sims_by_clust(self, x, top_k, fn):
         assert torch.is_tensor(x), "_sims_by_clust written assuming GPU in, looks like I was wrong & got a CPU val; fix this"
         assert top_k, "top_k must be specified if using clusters in similarity functions"
-        labels = self.labels[0]
+        labels = self.data.labels[0]
         res = []
         for l in range(labels.max()):
             mask = (labels == l)
@@ -173,7 +169,7 @@ class Similars(object):
         :param top_k: only return top-k smallest distances. If you cluster() before this cosine(), top_k is required.
             It will return (n_docs_in_cluster/top_k) per cluster.
         """
-        if self.labels is None:
+        if self.last_fn != 'cluster':
             res = self._cosine(x, y, abs=abs)
             if not top_k: return res
 
@@ -228,7 +224,7 @@ class Similars(object):
             # We use hnswlib knn_query method to find the top_k_hits
             return index.knn_query(x_, k)
 
-        if self.labels is None:
+        if self.data.labels is None:
             return fn(x, top_k)
         return self._sims_by_clust(x, top_k, fn)
 
@@ -243,40 +239,49 @@ class Similars(object):
         return math.floor(1 + 3.5 * math.log10(x.shape[0]))
 
     # Don't set device_in, in case algo=agg & cluster_both=True
-    @chain()
-    def cluster(self, x, y, algo='agglomorative', cluster_both=False):
+    @chain(keep='labels')
+    def cluster(self, x, y, algo='agglomorative'):
         """
-        :param cluster_both: if True, cluster x & y from the same pool & return [x_labels, y_labels];
-            otherwise just cluster x.
+        Clusters x, returning the cluster centroids and saving .data.labels away for later use.
+        If y is provided, x & y get clustered together from the same cluster-pool, then split. Make sure
+        this is what you want, otherwise cluster x separately on a different chain
         """
-        combo = x
-        if cluster_both and y is not None:
-            combo = self._join(x, y)
-        combo = Similars(combo)
+        both = self._join(x, y)
+        chain = Similars(both)
         if algo == 'agglomorative':
-            combo = combo.cosine(abs=True).value()
-            nc = self._default_n_clusters(combo)
+            both = chain.cosine(abs=True).value()
+            nc = self._default_n_clusters(both)
             labels = AgglomerativeClustering(
                 n_clusters=nc,
                 affinity='precomputed',
                 linkage='average'
-            ).fit_predict(combo)
+            ).fit_predict(both)
         elif algo == 'kmeans':
-            combo = combo.value()
+            both = chain.value()
             # Code from https://github.com/arvkevi/kneed/blob/master/notebooks/decreasing_function_walkthrough.ipynb
             step = 2  # math.ceil(guess.max / 10)
-            K = range(2, 40, step)
+            K = range(2, 40, step)  # FIXME use smarter min,max
             scores = []
             for k in K:
-                km = KMeans(n_clusters=k).fit(combo)
+                km = KMeans(n_clusters=k).fit(both)
                 scores.append(km.inertia_)
             S = 1  # math.floor(math.log(all.shape[0]))  # 1=default; 100entries->S=2, 8k->3
             kn = KneeLocator(list(K), scores, S=S, curve='convex', direction='decreasing', interp_method='polynomial')
-            nc = kn.knee or self._default_n_clusters(combo)
-            labels = KMeans(n_clusters=nc).fit(combo).labels_
+            nc = kn.knee or self._default_n_clusters(both)
+            labels = KMeans(n_clusters=nc).fit(both).labels_
         else:
             raise Exception("Other clusterers not yet supported (use kmeans|agglomorative)")
-        return self._split(labels, x, y) if cluster_both else labels
+        if y is None:
+            return self.centroids(x, labels), labels
+        l_x, l_y = self._split(labels, x, y)
+        return (self.centroids(x, l_x), self.centroids(y, l_y)), (l_x, l_y)
+
+    @staticmethod
+    def centroids(x, labels):
+        return np.array([
+            x[labels == l].mean(0).squeeze()
+            for l in range(labels.max())
+        ])
 
     @chain(device_in='cpu')
     def autoencode(self, x, y, dims=[500,150,20], filename=None, batch_norm=True):

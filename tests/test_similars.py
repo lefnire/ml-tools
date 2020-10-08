@@ -50,42 +50,28 @@ def test_normalize(abs, x, y):
 
 
 @pytest.mark.parametrize(
-    "algo,cluster_both,x,y",
+    "algo,x,y",
     [
-        ('kmeans', True, corpus, None),
-        ('kmeans', True, X, Y),
-        ('kmeans', False, corpus, None),
-        ('kmeans', False, X, Y),
-        ('agglomorative', True, corpus, None),
-        ('agglomorative', True, X, Y),
-        ('agglomorative', False, corpus, None),
-        ('agglomorative', False, X, Y),
+        ('kmeans', corpus, None),
+        ('kmeans', X, Y),
+        ('kmeans', corpus, None),
+        ('kmeans', X, Y),
+        ('agglomorative', corpus, None),
+        ('agglomorative', X, Y),
+        ('agglomorative', corpus, None),
+        ('agglomorative', X, Y),
     ])
-def test_cluster(algo, cluster_both, x, y):
-    res = Similars(x, y).embed().normalize().cluster(algo=algo, cluster_both=cluster_both).value()
-    print(res)
-    if cluster_both and y:
+def test_cluster(algo, x, y):
+    chain = Similars(x, y).embed().normalize().cluster(algo=algo)
+    res = chain.value()
+    # print(res)
+    if y is not None:
         assert len(res) == 2
-        assert len(res[1]) == len(y)
+        assert len(res[1]) < len(y)
+        assert len(chain.data.labels[1]) == len(y)
     else:
-        assert len(res) == len(x)
-
-@pytest.mark.parametrize(
-    "methods,x,y",
-    [
-        ([cleantext.keywords], corpus, None),
-        ([cleantext.keywords], X, Y),
-        ([cleantext.strip_html, cleantext.keywords], corpus, None),
-        ([cleantext.strip_html, cleantext.keywords], X, Y),
-    ])
-def test_cleantext(methods, x, y):
-    res = Similars(x, y).cleantext(methods).value()
-    print(res)
-    if y is None:
-        assert len(res) == len(x)
-    else:
-        assert len(res) == 2
-        assert len(res[1]) == len(y)
+        assert len(chain.data.labels) == len(x)
+        assert len(res) < len(x)
 
 
 @pytest.mark.parametrize(
