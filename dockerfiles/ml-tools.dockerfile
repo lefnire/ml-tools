@@ -24,3 +24,6 @@ RUN \
   spacy-stanza \
   lemminflect \
   gensim
+
+# TODO move this to /storage setup
+RUN python -m spacy download en_core_web_sm

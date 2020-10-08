@@ -24,13 +24,7 @@ nlp_fast = None
 def init_nlp_fast():
     global nlp_fast
     import lemminflect  # just import. Ties itself into spacy internals
-    m, kwargs = 'en_core_web_sm', dict(disable=['parser', 'ner'])
-    try:
-        # TODO put this on /storage (pretty small, but still)
-        nlp_fast = spacy.load(m, **kwargs)
-    except:
-        spacy.cli.download(m)
-        nlp_fast = spacy.load(m, **kwargs)
+    nlp_fast = spacy.load('en_core_web_sm', disable=['parser', 'ner'])
 
 
 # Much slower, but maybe more robust (see t.ent_type_ below)
