@@ -1,4 +1,4 @@
-import string, re, os, pdb
+import string, re, os, pdb, os
 import html as ihtml
 from bs4 import BeautifulSoup
 from tqdm import tqdm
@@ -6,49 +6,53 @@ from box import Box
 from gensim.models.phrases import Phrases, Phraser
 from gensim.parsing import preprocessing as pp
 from .utils import THREADS
-from markdown import Markdown
-from io import StringIO
+from textacy.preprocessing import replace as treplace
+from typing import List
+import logging
 
-# import spacy
-# spacy.prefer_gpu()
+# Markdown helpers
+from markdownify import markdownify  # html2md
+import markdown  # md2txt
+
+logger = logging.getLogger(__name__)
+
+from stanza.resources.common import DEFAULT_MODEL_DIR
+SPACY_GPU = True
+import spacy
+# Putting spacy files in same folder as stanza files
+# spacy.util.set_data_path(DEFAULT_MODEL_DIR)
+if SPACY_GPU:
+    spacy.prefer_gpu()
+
+nlp_fast = None
+def init_nlp_fast():
+    global nlp_fast
+    import lemminflect  # just import. Ties itself into spacy internals
+    m, kwargs = 'en_core_web_sm', dict(disable=['parser', 'ner'])
+    try:
+        # TODO put this on /storage (pretty small, but still)
+        nlp_fast = spacy.load(m, **kwargs)
+    except:
+        spacy.cli.download(m)
+        nlp_fast = spacy.load(m, **kwargs)
+
 
 # Much slower, but maybe more robust (see t.ent_type_ below)
 NER = False
-# CPU actually faster than cpu! (6it/s v 30it/s). Setting to True for now since I have one,
-# might as well save some CPU
-GPU = True
-# a1eed8c3: lemminflect
-import stanza
-from stanza.resources.common import DEFAULT_MODEL_DIR
-from spacy_stanza import StanzaLanguage
-proc = 'tokenize,pos,lemma'
-if NER: proc += ',ner'
-if not os.path.exists(DEFAULT_MODEL_DIR):
-    stanza.download('en')
-snlp = stanza.Pipeline(lang="en", processors=proc, use_gpu=GPU)
-nlp = StanzaLanguage(snlp)
-
-from textacy.preprocessing import replace as treplace
-import logging
-logger = logging.getLogger(__name__)
-
-
-def __unmark_element(element, stream=None):
-    if stream is None:
-        stream = StringIO()
-    if element.text:
-        stream.write(element.text)
-    for sub in element:
-        __unmark_element(sub, stream)
-    if element.tail:
-        stream.write(element.tail)
-    return stream.getvalue()
-
-# patching Markdown
-Markdown.output_formats["plain"] = __unmark_element
-__md = Markdown(output_format="plain")
-__md.stripTopLevelTags = False
-unmark = lambda s: __md.convert(s)
+nlp_accurate = None
+def init_nlp_accurate():
+    global nlp_accurate
+    # CPU actually faster than cpu! (6it/s v 30it/s). Setting to True for now since I have one,
+    # might as well save some CPU
+    # a1eed8c3: lemminflect
+    import stanza
+    from spacy_stanza import StanzaLanguage
+    proc = 'tokenize,pos,lemma'
+    if NER: proc += ',ner'
+    if not os.path.exists(DEFAULT_MODEL_DIR):
+        stanza.download('en')
+    snlp = stanza.Pipeline(lang="en", processors=proc, use_gpu=SPACY_GPU)
+    nlp_accurate = StanzaLanguage(snlp)
 
 
 # TODO use RE_PUNCT inserts for proper punctuation handling. See gensim.parsing.preprocessing.RE_PUNCT
@@ -56,8 +60,27 @@ unmark = lambda s: __md.convert(s)
 RE_PUNCT = "[.,!;?]"
 
 
+def mult_whitespace(s):
+    return pp.strip_multiple_whitespaces(s)
+
+
 def resub(pattern, replace_with, txt):
     return re.sub(pattern, replace_with, txt, flags=re.IGNORECASE)
+
+
+def md2txt(s):
+    html_ = markdown.markdown(s)
+    return html2txt(html_)
+
+
+def html2md(s):
+    return markdownify(s)
+
+
+def html2txt(s):
+    # s = UnicodeDammit.detwingle(s.encode()).decode()
+    s = ihtml.unescape(s)  # is this necessary?
+    return BeautifulSoup(s, "html5lib").text
 
 
 def one_or_many(chain=True, batch=False, keep=None):
@@ -101,7 +124,7 @@ class CleanText:
 
     @one_or_many()
     def unmark(self, s):
-        return unmark(s)
+        return md2txt(s)
 
     @one_or_many()
     def fix_punct(self, s):
@@ -124,9 +147,7 @@ class CleanText:
 
     @one_or_many()
     def strip_html(self, s):
-        # s = UnicodeDammit.detwingle(s.encode()).decode()
-        s = ihtml.unescape(s)  # is this necessary?
-        s = BeautifulSoup(s, "html5lib").text
+        s = html2txt(s)
         s = treplace.replace_urls(s, 'url')
         s = treplace.replace_emails(s, 'email')
         s = treplace.replace_phone_numbers(s, 'phone')
@@ -139,8 +160,7 @@ class CleanText:
 
     @one_or_many()
     def multiple_whitespace(self, s):
-        return pp.strip_multiple_whitespaces(s)
-        # return re.sub("\s+", "", s)  # temp: gensim slow download on tether
+        return mult_whitespace(s)
 
     @one_or_many()
     def normalize_numbers(self, s):
@@ -167,7 +187,7 @@ class CleanText:
         s = resub(r"(\d|\b)(k|m|b)\b", r"\1 amount ", s)
 
         # Remove over-added spaces during ^
-        s = resub(r"\s+", " ", s)
+        s = mult_whitespace(s)
 
         return s
 
@@ -192,7 +212,7 @@ class CleanText:
             end_with = ":"
 
         if not is_block: return False, ""
-        s = unmark(s)
+        s = md2txt(s)
         s = s if self.ends_w_punct(s) else s + end_with
         return True, s
 
@@ -201,7 +221,7 @@ class CleanText:
         # Convert doc(s) into paragraphs. Do some basic cleanup
         paras = []
         def clean_append(p):
-            p = unmark(p)
+            p = md2txt(p)
 
             if len(p) < 128: return
             p = CleanText(p).fix_punct().only_ascii().multiple_whitespace().value()
@@ -226,41 +246,43 @@ class CleanText:
             clean_append(line)
         return paras
 
-    @one_or_many(batch=True, keep='lemmas')
-    def keywords(
-        self,
-        docs,
-        postags=['NOUN', 'ADJ', 'VERB'],
-        silent=False,
-        bigrams=True,
+    # You'll never really call this on a single doc, so one_or_many is pointless; just error-preventing
+    @staticmethod
+    def _keywords_fast(pbar, docs, postags):
+        if nlp_fast is None: init_nlp_fast()
 
-        # TODO automate these somehow, based on corpus size or something? I don't understand them
-        bigram_min_count=1,
-        bigram_threshold=2
-    ):
-        """
-        Extracs keywords from documents using spacy lemmatization. Currently using Spacy Stanza (Stanford NLP),
-        which is much more accurate than standard Spacy in my experience, but it's also much slower.
-        See f87d5b26 for a faster version using lemminflect, still pretty accurate. TODO add that back in as
-        an option, like .keywords(mode=(accurate|fast))
-        :param docs: documents
-        :param postags: which POS_TAGS to include. Pretty important param, you might also want to add PROPN
-        :param silent: whether to print progress (it can take a while, so progress bar)
-        :param bigrams: whether to include bigrams
-
-        :return:
-        """
-        pbar = None
-        if not silent:
-            pbar = tqdm(total=len(docs))
-            logger.info("Lemmatizing keywords with Stanford NLP")
         clean = []
+        for doc in nlp_fast.pipe(docs):
+            assert doc, "keywords() got empty document. This should be handled in @wrapper"
+            pbar.update(1)
+            tokens = []
+            for t in doc:
+                if t.is_stop or t.is_punct: continue
+                elif t.like_num: t = 'number'
+                elif t.is_currency: t = 'currency'
+                elif t.pos_ == 'SYM': t = 'symbol'
+                elif t.pos_ not in postags: continue
+                else:
+                    t = t.lemma_.lower()
+                    t = pp.strip_non_alphanum(t)
+                    # token = only_ascii(t)
+                    if len(t) < 2: continue
+                tokens.append(t)
+            clean.append(tokens)
+        return clean
 
+
+    @staticmethod
+    def _keywords_accurate(pbar, docs, postags):
+        if nlp_accurate is None: init_nlp_accurate()
+
+        clean = []
         # batch_size doesn't seem to matter; n_process doesn't work with GPU, locks in CPU. n_threads deprecated
-        # See https://spacy.io/usage/examples#multi-processing
-        for doc in nlp.pipe(docs):
+        # Joblib approach https://spacy.io/usage/examples#multi-processing causes issues for threads|processes
+        # I give up, non-parallel it is!
+        for doc in nlp_accurate.pipe(docs):
+            assert doc, "keywords() got empty document. This should be handled in @wrapper"
             if pbar: pbar.update(1)
-            # if not doc: continue
             tokens = []
             for t in doc:
                 # https://spacy.io/api/token
@@ -271,7 +293,7 @@ class CleanText:
                 # slow, but catches sequences of hard-to-catch numeric stuff. Only save
                 # one in the sequence ($10m -> MONEY MONEY MONEY)
                 elif NER and tokens and tokens[-1] != t.ent_type_ and \
-                        t.ent_type_ in 'DATE TIME PERCENT ORDINAL MONEY QUANTITY'.split():
+                    t.ent_type_ in 'DATE TIME PERCENT ORDINAL MONEY QUANTITY'.split():
                     t = t.ent_type_
 
                 # Might want simple urls (apple.com), sticking to url/email regex in strip_html
@@ -297,23 +319,65 @@ class CleanText:
                     if treplace.replace_numbers(t) == '_NUM_': t = "number"
                 tokens.append(t)
             clean.append(tokens)
+        return clean
+
+    @one_or_many(batch=True, keep='lemmas')
+    def keywords(
+        self,
+        docs,
+        postags=['NOUN', 'ADJ', 'VERB'],
+        mode='fast',
+        silent=False,
+        bigrams=True,
+
+        # TODO automate these somehow, based on corpus size or something? I don't understand them
+        bigram_min_count=1,
+        bigram_threshold=2
+    ):
+        """
+        Extracs keywords from documents using spacy lemmatization.
+        :param docs: documents
+        :param postags: which POS_TAGS to include. Pretty important param, you might also want to add PROPN
+        :param mode: (fast|accurate). Fast uses lemminflect, accurate uses Stanford NLP. Pretty substantial in their
+            trade-off IMO. Could use some helping eyes on this code.
+        :param silent: whether to print progress (it can take a while, so progress bar)
+        :param bigrams: whether to include bigrams
+        """
+        pbar = None
+        if not silent:
+            pbar = tqdm(total=len(docs))
+            mode_ = {"fast": "Spacy + Lemminflect", "accurate": "spacy-stanza (Stanford NLP)"}[mode]
+            logger.info(f"Lemmatizing keywords with {mode_}")
+        fn = self._keywords_fast if mode == 'fast' else self._keywords_accurate
+        # could ensure they call this before keywords, because spacy is brittle without it, but this is easier.
+        docs = [mult_whitespace(d) for d in docs]
+        docs = fn(pbar, docs, postags)
         if pbar: pbar.close()
 
         set_ = lambda docs_: set(t for d in docs_ for t in d)
-        logger.info(f"Before bigrams {len(set_(clean))}")
+        if not silent:
+            logger.info(f"Before bigrams {len(set_(docs))}")
         if bigrams:
             # phrases = Phrases(docs, scoring='npmi', threshold=10e-5)
-            #  fiddle with min_count, threshold
+            # fiddle with min_count, threshold
             phrases = Phrases(
-                clean,
+                docs,
                 min_count=bigram_min_count,
                 threshold=bigram_threshold
             )
             bigram = Phraser(phrases)
-            clean = [bigram[d] for d in clean]
-        tokens = list(set_(clean))
-        logger.info(f"After bigrams {len(tokens)}")
+            docs = [bigram[d] for d in docs]
+        tokens = list(set_(docs))
+        if not silent:
+            logger.info(f"After bigrams {len(tokens)}")
 
         # self._save_lemmas_for_debug(tokens)
         # return [' '.join(d) for d in docs]
-        return clean, tokens
+        return docs, tokens
+
+    @one_or_many()
+    def join(self, doc: List[str]):
+        """
+        keywords() returns lists of tokens, this joins it back into strings
+        """
+        return ' '.join(doc)

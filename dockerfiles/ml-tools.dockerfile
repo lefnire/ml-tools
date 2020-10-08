@@ -2,18 +2,25 @@ FROM lefnire/ml-tools:transformers-pt-tf-0.0.5
 
 RUN \
   pip install --no-cache-dir \
+  # misc
   python-box \
+  tqdm \
+  pytest \
+  # ML
   pandas \
   xgboost \
   sklearn \
-  gensim \
-  beautifulsoup4 \
-  markdown \
   scipy \
-  html5lib \
   hyperopt \
   kneed \
-  tqdm \
+  # CleanText
+  beautifulsoup4 \
+  markdown \
+  markdownify \
+  html5lib \
   textacy \
-  pytest \
-  spacy-stanza
+  # NLP
+  spacy \
+  spacy-stanza \
+  lemminflect \
+  gensim
