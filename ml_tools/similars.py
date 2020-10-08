@@ -74,12 +74,14 @@ class Similars:
         self.data = data
 
     def value(self):
-        x, y = self.get_values('cpu')
+        x, y = self.get_values('cpu', unsqueeze=False)
         if y is None: return x
         return [x, y]
 
-    def get_values(self, device=None):
+    def get_values(self, device=None, unsqueeze=True):
         x, y = self.result
+        if device is None:
+            return x, y
         if device == 'gpu':
             if not torch.is_tensor(x):
                 x = torch.tensor(x)
@@ -90,18 +92,30 @@ class Similars:
                 x = x.cpu().numpy()
             if y is not None and torch.is_tensor(y):
                 y = y.cpu().numpy()
-        return [x, y]
+        else:
+            raise Exception("Device must be (gpu|cpu)")
+        if unsqueeze:
+            x, y = self._unsqueeze(x), self._unsqueeze(y)
+        return x, y
 
-    def _join(self, x, y):
+    @staticmethod
+    def _join(x, y):
         if y is None: return x
         if type(x) == list: return x + y
         if type(x) == np.ndarray: return np.vstack([x, y])
         if torch.is_tensor(x): return torch.cat((x, y), 0)
 
-    def _split(self, joined, x, y):
+    @staticmethod
+    def _split(joined, x, y):
         if y is None: return [joined, None]
         at = len(x) if type(x) == list else x.shape[0]
         return [joined[:at], joined[at:]]
+
+    @staticmethod
+    def _unsqueeze(t):
+        if t is None: return t
+        if len(t.shape) > 1: return t
+        return t.unsqueeze(0)
 
     @chain(together=True)
     def embed(self, both: List[str], batch_size=32):
@@ -124,11 +138,6 @@ class Similars:
     def normalize(self, both):
         return both / both.norm(dim=1)[:, None]
 
-    @staticmethod
-    def _unsqueeze(t):
-        if len(t.shape) > 1: return t
-        return t.unsqueeze(0)
-
     def _sims_by_clust(self, x, top_k, fn):
         assert torch.is_tensor(x), "_sims_by_clust written assuming GPU in, looks like I was wrong & got a CPU val; fix this"
         assert top_k, "top_k must be specified if using clusters in similarity functions"
@@ -144,10 +153,7 @@ class Similars:
         return torch.stack(res)
 
     def _cosine(self, x, y, abs=False, top_k=None):
-        x = self._unsqueeze(x)
         if y is None: y = x
-        else: y = self._unsqueeze(y)
-
         sim = torch.mm(x, y.T)
 
         if abs:

@@ -108,18 +108,22 @@ def one_or_many(chain=True, batch=False, keep=None):
             if keep:
                 data[keep] = txt[-1]
                 txt = txt[0]
-            return CleanText(txt, data)
+            return CleanText(txt, fn.__name__, data)
         return wrapper
     return decorator
 
 
 class CleanText:
-    def __init__(self, txt, data=Box()):
+    def __init__(self, txt, last_fn=None, data=Box()):
         self.result = txt
+        self.last_fn = last_fn
         self.data = data
 
     def value(self):
         txt = self.result
+        if self.last_fn == 'markdown_split_paragraphs':
+            # ensure it stays wrapped, even if just one paragraph
+            return txt
         return txt[0] if len(txt) == 1 else txt
 
     @one_or_many()
