@@ -239,7 +239,7 @@ class Similars:
         return math.floor(1 + 3.5 * math.log10(x.shape[0]))
 
     # Don't set device_in, in case algo=agg & cluster_both=True
-    @chain(keep='labels')
+    @chain(keep='labels', device_in='cpu')
     def cluster(self, x, y, algo='agglomorative'):
         """
         Clusters x, returning the cluster centroids and saving .data.labels away for later use.
@@ -247,9 +247,8 @@ class Similars:
         this is what you want, otherwise cluster x separately on a different chain
         """
         both = self._join(x, y)
-        chain = Similars(both)
         if algo == 'agglomorative':
-            both = chain.cosine(abs=True).value()
+            both = Similars(both).cosine(abs=True).value()
             nc = self._default_n_clusters(both)
             labels = AgglomerativeClustering(
                 n_clusters=nc,
@@ -257,7 +256,6 @@ class Similars:
                 linkage='average'
             ).fit_predict(both)
         elif algo == 'kmeans':
-            both = chain.value()
             # Code from https://github.com/arvkevi/kneed/blob/master/notebooks/decreasing_function_walkthrough.ipynb
             step = 2  # math.ceil(guess.max / 10)
             K = range(2, 40, step)  # FIXME use smarter min,max

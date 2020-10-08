@@ -1,4 +1,4 @@
-import string, re, os
+import string, re, os, pdb
 import html as ihtml
 from bs4 import BeautifulSoup
 from tqdm import tqdm
@@ -70,7 +70,8 @@ def one_or_many(chain=True, batch=False, keep=None):
         but also keeps the unique lemmas themselves, so you can debug later via cleantxt.data.lemmas
     """
     def decorator(fn):
-        def wrapper(self, txt, *args, **kwargs):
+        def wrapper(self, *args, **kwargs):
+            txt = self.result
             single = type(txt) == str
             if single: txt = [txt]
             # most functions can't handle empty strings
@@ -95,7 +96,8 @@ class CleanText:
         self.data = data
 
     def value(self):
-        return self.result
+        txt = self.result
+        return txt[0] if len(txt) == 1 else txt
 
     @one_or_many()
     def unmark(self, s):
@@ -255,6 +257,7 @@ class CleanText:
         clean = []
 
         # batch_size doesn't seem to matter; n_process doesn't work with GPU, locks in CPU. n_threads deprecated
+        # See https://spacy.io/usage/examples#multi-processing
         for doc in nlp.pipe(docs):
             if pbar: pbar.update(1)
             # if not doc: continue
@@ -297,7 +300,7 @@ class CleanText:
         if pbar: pbar.close()
 
         set_ = lambda docs_: set(t for d in docs_ for t in d)
-        logging.info('Before bigrams', len(set_(clean)))
+        logger.info(f"Before bigrams {len(set_(clean))}")
         if bigrams:
             # phrases = Phrases(docs, scoring='npmi', threshold=10e-5)
             #  fiddle with min_count, threshold
@@ -309,7 +312,7 @@ class CleanText:
             bigram = Phraser(phrases)
             clean = [bigram[d] for d in clean]
         tokens = list(set_(clean))
-        logging.info('After bigrams', len(tokens))
+        logger.info(f"After bigrams {len(tokens)}")
 
         # self._save_lemmas_for_debug(tokens)
         # return [' '.join(d) for d in docs]
