@@ -11,7 +11,7 @@ RUN \
   xgboost \
   sklearn \
   scipy \
-  hyperopt \
+  git+git://github.com/hyperopt/hyperopt.git@0.2.5 \
   kneed \
   # CleanText
   beautifulsoup4 \
