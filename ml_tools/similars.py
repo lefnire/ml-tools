@@ -157,10 +157,11 @@ class Similars:
         sim = torch.mm(x, y.T)
 
         if abs:
+            # See https://stackoverflow.com/a/63532174/362790 for the various options
             # print("sim.min=", sim.min(), "sim.max=", sim.max())
-            dist = (sim - 1).abs()
-            # See https://stackoverflow.com/a/63532174/362790 for other options
-            # dist = sim.acos() / np.pi
+            eps = np.finfo(float).eps
+            dist = sim.clamp(-1+eps, 1-eps).acos() / np.pi
+            # dist = (sim - 1).abs()  # <-- used this before, ends up in 0-2 range
             # dist = 1 - (sim + 1) / 2
         else:
             dist = 1. - sim
@@ -254,7 +255,9 @@ class Similars:
         """
         both = self._join(x, y)
         if algo == 'agglomorative':
-            both = Similars(both).cosine(abs=True).value()
+            c = Similars(both)
+            if self.last_fn != 'normalize': c = c.normalize()
+            both = c.cosine(abs=True).value()
             nc = self._default_n_clusters(both)
             labels = AgglomerativeClustering(
                 n_clusters=nc,
