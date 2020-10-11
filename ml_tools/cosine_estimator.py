@@ -34,15 +34,17 @@ class CosineEstimator:
             this will be the much larger of the two matrices in a comparison.
         """
         self.hypers = Box({
-            'l0': .5,
-            'l1': .25,
-            'l2': False,
-            'act': 'relu',
-            'final': 'sigmoid',
+            'l0': .6,
+            'l1': .5,
+            'l2': .2,
+            'act': 'elu',
+            'final': 'linear',
             'loss': 'mse',
-            'batch': 300,
-            'bn': True,
-            'opt': 'adam'
+            'batch': 128,
+            'bn': False,
+            'opt': 'adam',
+            'lr': .0001,
+            'fine_tune': 5
         })
 
         self.rhs = rhs
@@ -127,11 +129,10 @@ class CosineEstimator:
         # http://zerospectrum.com/2019/06/02/mae-vs-mse-vs-rmse/
         # MAE because we _want_ outliers (user score adjustments)
         loss = 'binary_crossentropy' if h.final == 'sigmoid' else h.loss
-        lr = .0003
         opt = Nadam if h.opt == 'nadam' else Adam
         m.compile(
             loss=loss,
-            optimizer=opt(learning_rate=lr),
+            optimizer=opt(learning_rate=h.lr),
         )
         m.summary()
         self.model = m
@@ -165,7 +166,7 @@ class CosineEstimator:
         batch_size = 16
         self.model.fit(
             self.generator_adjustments(lhs, adjustments, batch_size),
-            epochs=7,  # too many epochs overfits (eg to CBT). Maybe adjust LR *down*, or other?
+            epochs=self.hypers.fine_tune,  # too many epochs overfits (eg to CBT). Maybe adjust LR *down*, or other?
             # callbacks=[self.es],
             validation_data=self.generator_adjustments(lhs, adjustments, batch_size, validation=True),
             steps_per_epoch=self._nsteps(lhs, batch_size, .7),

@@ -16,12 +16,33 @@ rhs = np.load('/storage/libgen/testing.npy') #, mmap_mode='r')
 books = pd.read_feather('/storage/libgen/testing.df')
 
 dnn = CosineEstimator(rhs)
-# TODO hyperopt adjustments
-adjustments = np.zeros((rhs.shape[0],))
-regex = r"(cbt|virtual|cognitive)"
+
+orig_regex = r"(cbt|virtual|cognitive)"
+adjusts = Box(
+    mine_up= r"(cat|feline)",
+    mine_down=r"(mom|mother)",
+    other_up=r"(business|sales)",
+    other_down=orig_regex
+)
+def adjust(k, std):
+    ct = 0
+    def adjust_(text):
+        nonlocal ct
+        if ct > 50: return 0.
+        res = std if re.search(adjusts[f"{k}_up"], text, re.IGNORECASE)\
+            else -std if re.search(adjusts[f"{k}_down"], text, re.IGNORECASE)\
+            else 0.
+        if res: ct += 1
+    return adjust_
+all_txt = (books.title + books.text)
 
 
-table, max_evals = [], 300
+def ct_match(regex):
+    def ct_match_(txt):
+        return 1 if re.search(regex, txt, re.IGNORECASE) else 0
+    return ct_match_
+
+table, max_evals = [], 1000
 def objective(args):
     # first override the unecessary nesting, I don't like that
     for i in [0, 1, 2]:
@@ -30,8 +51,10 @@ def objective(args):
     dnn.hypers = Box(args)
     dnn.init_model(load=False)
     dnn.fit_cosine()
-    # TODO hyper-opt adjustment phase
-    # self.fit_adjustments(lhs, adjustments)
+
+    adjust_ = (all_txt.apply(adjust('mine', args['std_mine'])) + \
+               all_txt.apply(adjust('other', args['std_other']))).values
+    dnn.fit_adjustments(lhs, adjust_)
 
     # mse will be score
     preds = dnn.predict(lhs[0:1])
@@ -42,24 +65,24 @@ def objective(args):
     df = books.copy()
     df['dist'] = preds
     df = df.sort_values('dist').iloc[:200]
-    text = df.title + df.text
-    nbooks = sum([
-        1 if re.search(regex, x, re.IGNORECASE) else 0
-        for x in text
-    ])
+    texts = df.title + df.text
 
     args['mse'] = mse
-    args['nbooks'] = nbooks
+    args['n_orig'] = texts.apply(ct_match(orig_regex)).sum()
+    for k in ['mine_up', 'mine_down', 'other_up', 'other_down']:
+        args[f"n_{k}"] = texts.apply(ct_match(adjusts[k])).sum()
+    args['n_score'] = args['n_orig'] + args['n_mine_up']/2 - args['n_mine_down']\
+        + args['n_other_up']/5 - args['n_other_down']/5
     table.append(args)
 
-    df = pd.DataFrame(table).sort_values('mse')
+    df = pd.DataFrame(table).sort_values('n_score')
     print(f"Top 5 ({df.shape[0]}/{max_evals})")
     print(df.iloc[:5])
     print("All")
     print(df)
     df.to_csv('./hypers.csv')
 
-    return mse
+    return -args['n_score']
 
 # define a search space
 space = {
@@ -75,11 +98,15 @@ space = {
     ]),
     'act': hp.choice('act', ['elu', 'relu', 'tanh']),
     # no relu, since even though we constrain cosine positive, the adjustments may become negative
-    'final': hp.choice('final', ['sigmoid', 'linear']),
-    'loss': 'mse',  # hp.choice('loss', ['mse', 'mae']),
+    'final': 'linear',  # hp.choice('final', ['sigmoid', 'linear']),
+    'loss': hp.choice('loss', ['mse', 'mae']),
     'batch': scope.int(hp.quniform('batch', 32, 512, 32)),
     'bn': hp.choice('bn', [True, False]),
-    'opt': hp.choice('opt', ['adam', 'nadam'])
+    'opt': hp.choice('opt', ['adam', 'nadam']),
+    'lr': hp.uniform('lr', .0001, .001),
+    'fine_tune': scope.int(hp.uniform('fine_tune', 1, 20)),
+    'std_mine': hp.uniform('std_mine', .5, 2.),
+    'std_other': hp.uniform('std_other', .1, 1.)
 }
 
 # minimize the objective over the space
