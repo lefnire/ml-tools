@@ -34,13 +34,15 @@ class CosineEstimator:
             this will be the much larger of the two matrices in a comparison.
         """
         self.hypers = Box({
-            'l1': 800,
-            'l2': {'n': 300},
+            'l0': .7,
+            'l1': .3,
+            'l2': False,
             'act': 'tanh',
             'final': 'sigmoid',
-            'loss': 'mse',  # winner
+            'loss': 'mse',
             'batch': 300,
-            'norm': False  # winner
+            'bn': False,
+            'he_init': False
         })
 
         self.rhs = rhs
@@ -67,12 +69,8 @@ class CosineEstimator:
             idx = permute(rhs)[:batch_size]
             a = rhs[idx]
             b = a[permute(a)]
-            chain = Similars(a, b).normalize()
-            if self.hypers.norm is True:
-                a, b = chain.value()
-
             x = np.hstack([a, b])
-            y = chain.cosine(abs=True).value()
+            y = Similars(a, b).normalize().cosine(abs=True).value()
             y = y.diagonal()
             yield x, y
 
@@ -88,11 +86,8 @@ class CosineEstimator:
             n_lhs, n_rhs = lhs.shape[0], b.shape[0]
             a = np.tile(lhs, (math.ceil(n_rhs/n_lhs), 1))[:n_rhs]
 
-            chain = Similars(a, b).normalize()
-            if self.hypers.norm is True:
-                a, b = chain.value()
             x = np.hstack([a, b])
-            y = chain.cosine(abs=True).value().diagonal()
+            y = Similars(a, b).normalize().cosine(abs=True).value().diagonal()
             # Push highly-rated docs up, low-rated docs down. Using negative-score because cosine DISTANCE
             # (less is better)
             y = y - y.std() * adj
@@ -103,8 +98,6 @@ class CosineEstimator:
         for i in range(0, rhs.shape[0], batch_size):
             b = rhs[i:i+batch_size]
             a = np.repeat(x, b.shape[0], axis=0)
-            if self.hypers.norm is True:
-                a, b = Similars(a, b).normalize().value()
             yield np.hstack([a, b])
 
     def init_model(self, load=True):
@@ -116,14 +109,16 @@ class CosineEstimator:
         self.loaded = False
 
         h = self.hypers
-
-        input = Input(shape=(self.rhs.shape[1] * 2,))
+        dims = self.rhs.shape[1]
+        input = Input(shape=(dims * 2,))
         m = input
-        if h.norm == 'bn':
-            m = BatchNormalization()(m)
-        m = Dense(int(h.l1), activation=h.act)(m)
-        if h.l2.n:
-            m = Dense(int(h.l2.n), activation=h.act)(m)
+        for i in [0,1,2]:
+            d = h[f"l{i}"]
+            if not d: continue
+            kwargs = dict(activation=h.act)
+            if h.he_init: kwargs['kernel_initializer'] = 'he_uniform'
+            m = Dense(int(dims * d), **kwargs)(m)
+            if h.bn: m = BatchNormalization()(m)
         m = Dense(1, activation=h.final)(m)
         m = Model(input, m)
         # http://zerospectrum.com/2019/06/02/mae-vs-mse-vs-rmse/
@@ -194,8 +189,11 @@ class CosineEstimator:
 
 
     def hyperopt(self, lhs, adjustments, dataframe, regex: str):
-        table, max_evals = [], 100
+        table, max_evals = [], 300
         def objective(args):
+            # first override the unecessary nesting, I don't like that
+            for i in [0, 1, 2]:
+                args[f"l{i}"] = args[f"l{i}"][f"l{i}_n"]
             print(args)
             self.hypers = Box(args)
             self.init_model(load=False)
@@ -222,19 +220,25 @@ class CosineEstimator:
 
         # define a search space
         from hyperopt import hp
+        from hyperopt.pyll import scope
         space = {
-            'l1': hp.quniform('l1', 400, 1400, 100),
-            'l2': hp.choice('l2', [
-                {'n': None},
-                {'n': hp.quniform('n', 10, 600, 20)}
+            # actually comes through as {"l0": val}, see above
+            'l0': {'l0_n': hp.uniform('l0_n', 0., 1.)},
+            'l1': hp.choice('l1', [
+                {'l1_n': False},
+                {'l1_n': hp.uniform('l1_n', 0.05, 1.)}
             ]),
-            # no relu, since we may want negative values downstream
-            'act': hp.choice('act', ['tanh', 'elu']),
+            'l2': hp.choice('l2', [
+                {'l2_n': False},
+                {'l2_n': hp.uniform('l2_n', 0.005, 1.)}
+            ]),
+            'act': hp.choice('act', ['tanh', 'relu']),
             # no relu, since even though we constrain cosine positive, the adjustments may become negative
-            'final': hp.choice('final', ['sigmoid', 'linear', 'elu']),
-            'loss': 'mse',  # hp.choice('loss', ['mse', 'mae']),
-            'batch': 300,  # hp.quniform('batch', 32, 512, 32),
-            'norm': False,  # hp.choice('norm', [True, False, 'bn'])
+            'final': hp.choice('final', ['sigmoid', 'linear']),
+            'loss': 'mse', # hp.choice('loss', ['mse', 'mae']),
+            'batch': scope.int(hp.quniform('batch', 32, 512, 32)),
+            'bn': hp.choice('bn', [True, False]),
+            'he_init': hp.choice('he_init', [True, False])
         }
 
         # minimize the objective over the space
