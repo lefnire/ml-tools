@@ -8,7 +8,7 @@ from tensorflow.keras import backend as K
 from tensorflow.keras.layers import Input, Dense, BatchNormalization
 from tensorflow.keras.models import Model, load_model
 from tensorflow.keras.callbacks import EarlyStopping
-from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.optimizers import Adam, Nadam
 from tensorflow.keras.utils import Sequence
 
 import pdb, logging, math, re
@@ -34,15 +34,15 @@ class CosineEstimator:
             this will be the much larger of the two matrices in a comparison.
         """
         self.hypers = Box({
-            'l0': .7,
-            'l1': .3,
+            'l0': .5,
+            'l1': .25,
             'l2': False,
-            'act': 'tanh',
+            'act': 'relu',
             'final': 'sigmoid',
             'loss': 'mse',
             'batch': 300,
-            'bn': False,
-            'he_init': False
+            'bn': True,
+            'opt': 'adam'
         })
 
         self.rhs = rhs
@@ -70,8 +70,7 @@ class CosineEstimator:
             a = rhs[idx]
             b = a[permute(a)]
             x = np.hstack([a, b])
-            y = Similars(a, b).normalize().cosine(abs=True).value()
-            y = y.diagonal()
+            y = Similars(a, b).normalize().cosine(abs=True).value().diagonal()
             yield x, y
 
     def generator_adjustments(self, lhs, adjustments, batch_size, validation=False):
@@ -109,24 +108,30 @@ class CosineEstimator:
         self.loaded = False
 
         h = self.hypers
-        dims = self.rhs.shape[1]
-        input = Input(shape=(dims * 2,))
+        dims = self.rhs.shape[1] * 2
+        input = Input(shape=(dims,))
         m = input
+        last_dim = dims
         for i in [0,1,2]:
             d = h[f"l{i}"]
             if not d: continue
+            d = math.ceil(d * last_dim)
+            last_dim = d
             kwargs = dict(activation=h.act)
-            if h.he_init: kwargs['kernel_initializer'] = 'he_uniform'
-            m = Dense(int(dims * d), **kwargs)(m)
+            kwargs['kernel_initializer'] = 'glorot_uniform' \
+                if h.act == 'tanh' else 'he_uniform'
+            m = Dense(d, **kwargs)(m)
             if h.bn: m = BatchNormalization()(m)
         m = Dense(1, activation=h.final)(m)
         m = Model(input, m)
         # http://zerospectrum.com/2019/06/02/mae-vs-mse-vs-rmse/
         # MAE because we _want_ outliers (user score adjustments)
         loss = 'binary_crossentropy' if h.final == 'sigmoid' else h.loss
+        lr = .0003
+        opt = Nadam if h.opt == 'nadam' else Adam
         m.compile(
             loss=loss,
-            optimizer=Adam(learning_rate=.0001),
+            optimizer=opt(learning_rate=lr),
         )
         m.summary()
         self.model = m
@@ -186,66 +191,3 @@ class CosineEstimator:
                 continue
             best = np.vstack([best, preds]).min(axis=0)
         return best
-
-
-    def hyperopt(self, lhs, adjustments, dataframe, regex: str):
-        table, max_evals = [], 300
-        def objective(args):
-            # first override the unecessary nesting, I don't like that
-            for i in [0, 1, 2]:
-                args[f"l{i}"] = args[f"l{i}"][f"l{i}_n"]
-            print(args)
-            self.hypers = Box(args)
-            self.init_model(load=False)
-            self.fit_cosine()
-            self.fit_adjustments(lhs, adjustments)
-            preds = self.predict(lhs)
-            df = dataframe.copy()
-            df['dist'] = preds
-            df = df.sort_values('dist').iloc[:200]
-            text = df.title + df.text
-            score = sum([
-                1 if re.search(regex, x, re.IGNORECASE) else 0
-                for x in text
-            ])
-            args['score'] = score
-            table.append(args)
-            df = pd.DataFrame(table).sort_values('score', ascending=False)
-            print(f"Top 5 ({df.shape[0]}/{max_evals})")
-            print(df.iloc[:5])
-            print("All")
-            print(df)
-            df.to_csv('./hypers.csv')
-            return -score
-
-        # define a search space
-        from hyperopt import hp
-        from hyperopt.pyll import scope
-        space = {
-            # actually comes through as {"l0": val}, see above
-            'l0': {'l0_n': hp.uniform('l0_n', 0., 1.)},
-            'l1': hp.choice('l1', [
-                {'l1_n': False},
-                {'l1_n': hp.uniform('l1_n', 0.05, 1.)}
-            ]),
-            'l2': hp.choice('l2', [
-                {'l2_n': False},
-                {'l2_n': hp.uniform('l2_n', 0.005, 1.)}
-            ]),
-            'act': hp.choice('act', ['tanh', 'relu']),
-            # no relu, since even though we constrain cosine positive, the adjustments may become negative
-            'final': hp.choice('final', ['sigmoid', 'linear']),
-            'loss': 'mse', # hp.choice('loss', ['mse', 'mae']),
-            'batch': scope.int(hp.quniform('batch', 32, 512, 32)),
-            'bn': hp.choice('bn', [True, False]),
-            'he_init': hp.choice('he_init', [True, False])
-        }
-
-        # minimize the objective over the space
-        from hyperopt import fmin, tpe, space_eval
-        best = fmin(objective, space, algo=tpe.suggest, max_evals=max_evals, show_progressbar=False)
-
-        print(best)
-        # -> {'a': 1, 'c2': 0.01420615366247227}
-        print(space_eval(space, best))
-        # -> ('case 2', 0.01420615366247227}
