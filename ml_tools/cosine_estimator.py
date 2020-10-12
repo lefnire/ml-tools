@@ -91,7 +91,8 @@ class CosineEstimator:
             y = Similars(a, b).normalize().cosine(abs=True).value().diagonal()
             # Push highly-rated docs up, low-rated docs down. Using negative-score because cosine DISTANCE
             # (less is better)
-            y = y - y.std() * adj
+            # y = y - y.std() * adj
+            y = y - adj
             yield x, y
 
     def generator_predict(self, batch_size, x):

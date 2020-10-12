@@ -17,12 +17,15 @@ books = pd.read_feather('/storage/libgen/testing.df')
 
 dnn = CosineEstimator(rhs)
 
-orig_regex = r"(cbt|virtual|cognitive)"
+
 adjusts = Box(
-    mine_up= r"(cat|feline)",
-    mine_down=r"(mom|mother)",
-    other_up=r"(business|sales)",
-    other_down=orig_regex
+    entries=r"(cbt|virtual|cognitive)",
+    mine_up= r"(video\s?game|gaming)",
+    mine_down=r"(america|politics|united states)",
+)
+adjusts.update(
+    other_up=r"(president|trump|elections|therapy|mental health|fitness)",
+    other_down=r"(gaming|video\s?game|astrology|moon)"
 )
 def adjust(k, std):
     ct = 0
@@ -33,6 +36,7 @@ def adjust(k, std):
             else -std if re.search(adjusts[f"{k}_down"], text, re.IGNORECASE)\
             else 0.
         if res: ct += 1
+        return res
     return adjust_
 all_txt = (books.title + books.text)
 
@@ -52,8 +56,9 @@ def objective(args):
     dnn.init_model(load=False)
     dnn.fit_cosine()
 
-    adjust_ = (all_txt.apply(adjust('mine', args['std_mine'])) + \
-               all_txt.apply(adjust('other', args['std_other']))).values
+    std_mine, std_other = args['std_mine'], args['std_mine'] * args['std_other']
+    adjust_ = (all_txt.apply(adjust('mine', std_mine)) + \
+               all_txt.apply(adjust('other', std_other))).values
     dnn.fit_adjustments(lhs, adjust_)
 
     # mse will be score
@@ -63,19 +68,20 @@ def objective(args):
 
     # but also want to see how many subjectively-good books it recommended
     df = books.copy()
-    df['dist'] = preds
+    df['dist'] = dnn.predict(lhs)
     df = df.sort_values('dist').iloc[:200]
     texts = df.title + df.text
+    print(df.title.iloc[:50])
 
     args['mse'] = mse
-    args['n_orig'] = texts.apply(ct_match(orig_regex)).sum()
+    args['n_orig'] = texts.apply(ct_match(adjusts.entries)).sum()
     for k in ['mine_up', 'mine_down', 'other_up', 'other_down']:
         args[f"n_{k}"] = texts.apply(ct_match(adjusts[k])).sum()
     args['n_score'] = args['n_orig'] + args['n_mine_up']/2 - args['n_mine_down']\
         + args['n_other_up']/5 - args['n_other_down']/5
     table.append(args)
 
-    df = pd.DataFrame(table).sort_values('n_score')
+    df = pd.DataFrame(table).sort_values('n_score', ascending=False)
     print(f"Top 5 ({df.shape[0]}/{max_evals})")
     print(df.iloc[:5])
     print("All")
@@ -104,9 +110,9 @@ space = {
     'bn': hp.choice('bn', [True, False]),
     'opt': hp.choice('opt', ['adam', 'nadam']),
     'lr': hp.uniform('lr', .0001, .001),
-    'fine_tune': scope.int(hp.uniform('fine_tune', 1, 20)),
-    'std_mine': hp.uniform('std_mine', .5, 2.),
-    'std_other': hp.uniform('std_other', .1, 1.)
+    'fine_tune': scope.int(hp.uniform('fine_tune', 1, 15)),
+    'std_mine': hp.uniform('std_mine', .1, 1.),
+    'std_other': hp.uniform('std_other', .0, 1.)  # is multiplied by std_min
 }
 
 # minimize the objective over the space
