@@ -15,7 +15,7 @@ lhs = Similars(lhs).embed().cluster(algo='agglomorative').value()
 rhs = np.load('/storage/libgen/testing.npy') #, mmap_mode='r')
 books = pd.read_feather('/storage/libgen/testing.df')
 
-dnn = CosineEstimator(rhs)
+dnn = CosineEstimator(lhs, rhs)
 
 
 adjusts = Box(
@@ -55,20 +55,16 @@ def objective(args):
     dnn.hypers = Box(args)
     dnn.init_model(load=False)
     dnn.fit_cosine()
+    mse = dnn.loss
 
     std_mine, std_other = args['std_mine'], args['std_mine'] * args['std_other']
     adjust_ = (all_txt.apply(adjust('mine', std_mine)) + \
                all_txt.apply(adjust('other', std_other))).values
-    dnn.fit_adjustments(lhs, adjust_)
+    dnn.fit_adjustments(adjust_)
 
-    # mse will be score
-    preds = dnn.predict(lhs[0:1])
-    y_true = Similars(lhs[0:1], rhs).normalize().cosine(abs=True).value().squeeze()
-    mse = mean_squared_error(y_true, preds).numpy()
-
-    # but also want to see how many subjectively-good books it recommended
+    # see how many subjectively-good books it recommended
     df = books.copy()
-    df['dist'] = dnn.predict(lhs)
+    df['dist'] = dnn.predict()
     df = df.sort_values('dist').iloc[:200]
     texts = df.title + df.text
     print(df.title.iloc[:50])
