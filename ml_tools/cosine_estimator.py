@@ -34,17 +34,17 @@ class CosineEstimator:
             this will be the much larger of the two matrices in a comparison.
         """
         self.hypers = Box({
-            'l0': .6,
-            'l1': .5,
-            'l2': .2,
-            'act': 'elu',
+            'l0': .5,
+            'l1': .4,
+            'l2': .3,
+            'act': 'tanh',
             'final': 'linear',
-            'loss': 'mse',
-            'batch': 128,
+            'loss': 'mae',
+            'batch': 64,
             'bn': False,
             'opt': 'adam',
-            'lr': .0001,
-            'fine_tune': 5
+            'lr': .0002,
+            'fine_tune': 1
         })
 
         self.rhs = rhs
