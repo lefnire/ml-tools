@@ -49,14 +49,14 @@ class CosineEstimator:
 
         self.rhs = rhs
         self.filename = filename
-        self.split = int(rhs.shape[0] * .7)
         self.model = None
         self.es = EarlyStopping(monitor='val_loss', mode='min', patience=3, min_delta=.0001)
         self.loaded = False
         self.init_model()
 
     def _dset(self, arr: np.ndarray, validation):
-        return arr[self.split:] if validation else arr[:self.split]
+        split = int(arr.shape[0] * .7)
+        return arr[split:] if validation else arr[:split]
 
     def _nsteps(self, arr: np.ndarray, batch_size, split):
         return math.ceil(arr.shape[0] * split / batch_size)
@@ -76,8 +76,9 @@ class CosineEstimator:
             yield x, y
 
     def generator_adjustments(self, lhs, adjustments, batch_size, validation=False):
-        rhs = self._dset(self.rhs, validation)
-        adjustments = self._dset(adjustments, validation)
+        mask = adjustments != 0
+        rhs = self._dset(self.rhs[mask], validation)
+        adjustments = self._dset(adjustments[mask], validation)
         while True:
             idx = permute(rhs)[:batch_size]
             b = rhs[idx]
