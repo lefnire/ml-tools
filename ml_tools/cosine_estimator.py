@@ -119,7 +119,7 @@ class CosineEstimator:
             shuffle=True,
             validation_split=.3
         )
-        self.loss = history.history['val_loss']
+        self.loss = history.history['val_loss'][-1]
         if self.filename:
             self.model.save(self.filename)
 
@@ -141,4 +141,4 @@ class CosineEstimator:
         )
 
     def predict(self):
-        return self.model.predict(self.rhs)
+        return self.model.predict(self.rhs, batch_size=200).squeeze()

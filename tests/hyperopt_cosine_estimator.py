@@ -24,7 +24,7 @@ adjusts = Box(
     mine_down=r"(america|politics|united states)",
 )
 adjusts.update(
-    other_up=r"(president|trump|elections|therapy|mental health|fitness)",
+    other_up=r"(president|trump|elections|fitness|gym|exercise)",
     other_down=r"(gaming|video\s?game|astrology|moon)"
 )
 def adjust(k, std):
@@ -73,18 +73,20 @@ def objective(args):
     args['n_orig'] = texts.apply(ct_match(adjusts.entries)).sum()
     for k in ['mine_up', 'mine_down', 'other_up', 'other_down']:
         args[f"n_{k}"] = texts.apply(ct_match(adjusts[k])).sum()
-    args['n_score'] = args['n_orig'] + args['n_mine_up']/2 - args['n_mine_down']\
-        + args['n_other_up']/5 - args['n_other_down']/5
+    score = args['n_orig'] + args['n_mine_up'] - args['n_mine_down']\
+        + args['n_other_up']/10 - args['n_other_down']/10
+    score = score + (1-np.clip(mse,0,1))*100
+    args['score'] = score
     table.append(args)
 
-    df = pd.DataFrame(table).sort_values('n_score', ascending=False)
+    df = pd.DataFrame(table).sort_values('score', ascending=False)
     print(f"Top 5 ({df.shape[0]}/{max_evals})")
     print(df.iloc[:5])
     print("All")
     print(df)
     df.to_csv('./hypers.csv')
 
-    return -args['n_score']
+    return -score
 
 # define a search space
 space = {
@@ -94,10 +96,11 @@ space = {
         {'l1_n': False},
         {'l1_n': hp.uniform('l1_n', 0.1, 1.)}
     ]),
-    'l2': hp.choice('l2', [
-        {'l2_n': False},
-        {'l2_n': hp.uniform('l2_n', 0.1, 1.)}
-    ]),
+    'l2': {'l2_n': False},
+    # hp.choice('l2', [
+    #     {'l2_n': False},
+    #     {'l2_n': hp.uniform('l2_n', 0.1, 1.)}
+    # ]),
     'act': hp.choice('act', ['elu', 'relu', 'tanh']),
     # no relu, since even though we constrain cosine positive, the adjustments may become negative
     'final': 'linear',  # hp.choice('final', ['sigmoid', 'linear']),
@@ -106,8 +109,8 @@ space = {
     'bn': hp.choice('bn', [True, False]),
     'opt': hp.choice('opt', ['adam', 'nadam']),
     'lr': hp.uniform('lr', .0001, .001),
-    'fine_tune': scope.int(hp.uniform('fine_tune', 1, 15)),
-    'std_mine': hp.uniform('std_mine', .1, 1.),
+    'fine_tune': scope.int(hp.uniform('fine_tune', 1, 10)),
+    'std_mine': hp.uniform('std_mine', .01, 1.),
     'std_other': hp.uniform('std_other', .0, 1.)  # is multiplied by std_min
 }
 
