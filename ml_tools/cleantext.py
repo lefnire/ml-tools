@@ -232,10 +232,7 @@ class CleanText:
         # Convert doc(s) into paragraphs. Do some basic cleanup
         paras = []
         def clean_append(p):
-            p = md2txt(p)
-
-            if len(p) < 128: return
-            p = CleanText(p).fix_punct().only_ascii().multiple_whitespace().value()
+            p = CleanText(p).unmark().fix_punct().only_ascii().multiple_whitespace().value()
             if not self.ends_w_punct(p):
                 p = p + "."
             paras.append(p)
