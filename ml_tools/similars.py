@@ -43,7 +43,7 @@ def chain(device_in=None, keep=None, together=False):
             if type(res) != list: res = [res, None]
             # Save intermediate result, and chained methods can continue
 
-            return Similars(*res, last_fn=fn.__name__, data=data)
+            return self.__class__(*res, last_fn=fn.__name__, data=data)
         return wrapper
     return decorator
 

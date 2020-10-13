@@ -115,7 +115,7 @@ def one_or_many(batch=False, keep=None):
             if keep:
                 data[keep] = txt[-1]
                 txt = txt[0]
-            return CleanText(txt, fn.__name__, data)
+            return self.__class__(txt, fn.__name__, data)
         return wrapper
     return decorator
 
@@ -378,9 +378,6 @@ class CleanText:
         tokens = list(set_(docs))
         if not silent:
             logger.info(f"After bigrams {len(tokens)}")
-
-        # self._save_lemmas_for_debug(tokens)
-        # return [' '.join(d) for d in docs]
         return docs, tokens
 
     @one_or_many()
