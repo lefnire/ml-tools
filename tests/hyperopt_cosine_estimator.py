@@ -101,14 +101,14 @@ space = {
     #     {'l2_n': False},
     #     {'l2_n': hp.uniform('l2_n', 0.1, 1.)}
     # ]),
-    'act': hp.choice('act', ['elu', 'relu', 'tanh']),
+    'act': 'tanh', # hp.choice('act', ['elu', 'relu', 'tanh']),
     # no relu, since even though we constrain cosine positive, the adjustments may become negative
     'final': 'linear',  # hp.choice('final', ['sigmoid', 'linear']),
-    'loss': hp.choice('loss', ['mse', 'mae']),
-    'batch': scope.int(hp.quniform('batch', 32, 512, 32)),
-    'bn': hp.choice('bn', [True, False]),
-    'opt': hp.choice('opt', ['adam', 'nadam']),
-    'lr': hp.uniform('lr', .0001, .001),
+    'loss': 'mae', # hp.choice('loss', ['mse', 'mae']),
+    'batch': 128, # scope.int(hp.quniform('batch', 32, 512, 32)),
+    'bn': False, # hp.choice('bn', [True, False]),
+    'opt': 'adam', # hp.choice('opt', ['adam', 'nadam']),
+    'lr': .0002,  # hp.uniform('lr', .0001, .001),
     'fine_tune': scope.int(hp.uniform('fine_tune', 1, 10)),
     'std_mine': hp.uniform('std_mine', .01, 1.),
     'std_other': hp.uniform('std_other', .0, 1.)  # is multiplied by std_min

@@ -41,11 +41,11 @@ class CosineEstimator:
             'act': 'tanh',
             'final': 'linear',
             'loss': 'mae',
-            'batch': 64,
+            'batch': 128,
             'bn': False,
             'opt': 'adam',
             'lr': .0002,
-            'fine_tune': 1
+            'fine_tune': 2
         })
 
         self.lhs = lhs
