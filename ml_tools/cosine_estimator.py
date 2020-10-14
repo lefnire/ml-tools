@@ -113,7 +113,8 @@ class CosineEstimator:
         # https://www.machinecurve.com/index.php/2020/04/06/using-simple-generators-to-flow-data-from-file-with-keras/
         # https://www.tensorflow.org/api_docs/python/tf/keras/Model#fit
         batch_size = int(self.hypers.batch)
-        x, y = self.lhs, self.y
+        shuff = permute(self.y)
+        x, y = self.rhs[shuff], self.y[shuff]
 
         extra = {}
         sample_weight, adjustments = self.hypers.sample_weight, self.adjustments

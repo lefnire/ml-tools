@@ -381,8 +381,9 @@ class CleanText:
         return docs, tokens
 
     @one_or_many()
-    def join(self, doc: List[str]):
+    def join(self, terms: List[str]):
         """
         keywords() returns lists of tokens, this joins it back into strings
         """
-        return ' '.join(doc)
+        if type(terms) == str: return terms
+        return ' '.join(terms)

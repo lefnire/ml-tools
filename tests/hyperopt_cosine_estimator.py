@@ -1,5 +1,4 @@
-import re
-from tensorflow.keras.losses import mean_squared_error
+import re, pdb
 from box import Box
 from ml_tools import CosineEstimator, Similars
 from ml_tools.fixtures import articles
@@ -61,8 +60,10 @@ def objective(args):
 
 
     std_mine, std_other = args['std_mine'], args['std_mine'] * args['std_other']
-    adjust_ = (all_txt.apply(adjust('mine', std_mine)) + \
-               all_txt.apply(adjust('other', std_other))).values
+    adjust_mine = all_txt.apply(adjust('mine', std_mine))
+    # start from other end so there's no overlap
+    adjust_other = all_txt[::-1].apply(adjust('other', std_other))[::-1]
+    adjust_ = (adjust_mine + adjust_other).values
 
     dnn.hypers = Box(args)
     dnn.adjustments = adjust_
