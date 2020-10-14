@@ -29,7 +29,7 @@ class CosineEstimator:
     Neural network that learns the cosine DISTANCE function (between 0-1, 0 being similar, 1 being distant). Also
     allows fine-tuning adjustments of those similarities, eg in the case of user-ratings on documents (embedded).
     """
-    def __init__(self, lhs, rhs, filename=None):
+    def __init__(self, lhs, rhs, adjustments=None, filename=None):
         """
         :param rhs: right-hand-side, ie the database/corpus/index you'll be comparing things against later. Usually
             this will be the much larger of the two matrices in a comparison.
@@ -45,12 +45,13 @@ class CosineEstimator:
             'bn': False,
             'opt': 'adam',
             'lr': .0002,
-            'fine_tune': 2
+            'sample_weight': 5.
         })
 
         self.lhs = lhs
         self.rhs = rhs
         self.y = np.hstack([d for d in self.gen_dists()])
+        self.adjustments = adjustments
         self.filename = filename
         self.model = None
         self.loss = None
@@ -101,7 +102,8 @@ class CosineEstimator:
         m.summary()
         self.model = m
 
-    def fit_cosine(self):
+
+    def fit(self):
         if self.loaded:
             logger.info("DNN: using cosine-pretrained")
             return
@@ -111,8 +113,20 @@ class CosineEstimator:
         # https://www.machinecurve.com/index.php/2020/04/06/using-simple-generators-to-flow-data-from-file-with-keras/
         # https://www.tensorflow.org/api_docs/python/tf/keras/Model#fit
         batch_size = int(self.hypers.batch)
+        x, y = self.lhs, self.y
+
+        extra = {}
+        sample_weight, adjustments = self.hypers.sample_weight, self.adjustments
+        if sample_weight and adjustments is not None and adjustments.any():
+            logger.info("Using sample weight")
+            y = y - adjustments
+            sw = np.ones(y.shape[0])
+            sw[adjustments != 0] = sample_weight
+            extra['sample_weight'] = sw
+
         history = self.model.fit(
             self.rhs, self.y,
+            **extra,
             epochs=50,
             callbacks=[self.es],
             batch_size=batch_size,
@@ -122,23 +136,6 @@ class CosineEstimator:
         self.loss = history.history['val_loss'][-1]
         if self.filename:
             self.model.save(self.filename)
-
-    def fit_adjustments(self, adjustments):
-        if not adjustments.any(): return
-        logger.info("DNN: learn adjustments function")
-        y = self.y - adjustments
-        mask = adjustments != 0
-        rhs, y = self.rhs[mask], y[mask]
-
-        batch_size = 16
-        self.model.fit(
-            rhs, y,
-            batch_size=batch_size,
-            epochs=self.hypers.fine_tune,  # too many epochs overfits (eg to CBT). Maybe adjust LR *down*, or other?
-            # callbacks=[self.es],
-            shuffle=True,
-            validation_split=.3
-        )
 
     def predict(self):
         return self.model.predict(self.rhs, batch_size=200).squeeze()

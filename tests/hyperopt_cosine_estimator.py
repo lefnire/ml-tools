@@ -17,15 +17,14 @@ books = pd.read_feather('/storage/libgen/testing.df')
 
 dnn = CosineEstimator(lhs, rhs)
 
-
 adjusts = Box(
     entries=r"(cbt|virtual|cognitive)",
-    mine_up= r"(video\s?game|gaming)",
+    mine_up= r"(python|javascript|tensorflow)",
     mine_down=r"(america|politics|united states)",
 )
 adjusts.update(
     other_up=r"(president|trump|elections|fitness|gym|exercise)",
-    other_down=r"(gaming|video\s?game|astrology|moon)"
+    other_down=r"(python|javascript|astrology|moon)"
 )
 def adjust(k, std):
     ct = 0
@@ -46,21 +45,30 @@ def ct_match(regex):
         return 1 if re.search(regex, txt, re.IGNORECASE) else 0
     return ct_match_
 
+from sklearn.utils import class_weight
+will_adjust = np.zeros(rhs.shape[0])
+will_adjust[:100] = np.ones(100)
+cw = class_weight.compute_sample_weight('balanced', (will_adjust != 0))
+max_sample_weight = cw.max() / cw.min()
+print('max_sample_weight', max_sample_weight)
+
 table, max_evals = [], 1000
 def objective(args):
     # first override the unecessary nesting, I don't like that
     for i in [0, 1, 2]:
         args[f"l{i}"] = args[f"l{i}"][f"l{i}_n"]
     print(args)
-    dnn.hypers = Box(args)
-    dnn.init_model(load=False)
-    dnn.fit_cosine()
-    mse = dnn.loss
+
 
     std_mine, std_other = args['std_mine'], args['std_mine'] * args['std_other']
     adjust_ = (all_txt.apply(adjust('mine', std_mine)) + \
                all_txt.apply(adjust('other', std_other))).values
-    dnn.fit_adjustments(adjust_)
+
+    dnn.hypers = Box(args)
+    dnn.adjustments = adjust_
+    dnn.init_model(load=False)
+    dnn.fit()
+    mse = dnn.loss
 
     # see how many subjectively-good books it recommended
     df = books.copy()
@@ -109,7 +117,7 @@ space = {
     'bn': False, # hp.choice('bn', [True, False]),
     'opt': 'adam', # hp.choice('opt', ['adam', 'nadam']),
     'lr': .0002,  # hp.uniform('lr', .0001, .001),
-    'fine_tune': scope.int(hp.uniform('fine_tune', 1, 10)),
+    'sample_weight': hp.uniform('sample_weight', 1., max_sample_weight),
     'std_mine': hp.uniform('std_mine', .01, 1.),
     'std_other': hp.uniform('std_other', .0, 1.)  # is multiplied by std_min
 }
