@@ -120,13 +120,14 @@ class CosineEstimator:
         sample_weight, adjustments = self.hypers.sample_weight, self.adjustments
         if sample_weight and adjustments is not None and adjustments.any():
             logger.info("Using sample weight")
+            adjustments = adjustments[shuff]
             y = y - adjustments
             sw = np.ones(y.shape[0])
             sw[adjustments != 0] = sample_weight
             extra['sample_weight'] = sw
 
         history = self.model.fit(
-            self.rhs, self.y,
+            x, y,
             **extra,
             epochs=50,
             callbacks=[self.es],

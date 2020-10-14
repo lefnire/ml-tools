@@ -25,11 +25,12 @@ adjusts.update(
     other_up=r"(president|trump|elections|fitness|gym|exercise)",
     other_down=r"(python|javascript|astrology|moon)"
 )
+vote_ct = 100
 def adjust(k, std):
     ct = 0
     def adjust_(text):
         nonlocal ct
-        if ct > 50: return 0.
+        if ct > vote_ct: return 0.
         res = std if re.search(adjusts[f"{k}_up"], text, re.IGNORECASE)\
             else -std if re.search(adjusts[f"{k}_down"], text, re.IGNORECASE)\
             else 0.
@@ -46,7 +47,7 @@ def ct_match(regex):
 
 from sklearn.utils import class_weight
 will_adjust = np.zeros(rhs.shape[0])
-will_adjust[:100] = np.ones(100)
+will_adjust[:vote_ct*2] = np.ones(vote_ct*2)
 cw = class_weight.compute_sample_weight('balanced', (will_adjust != 0))
 max_sample_weight = cw.max() / cw.min()
 print('max_sample_weight', max_sample_weight)
@@ -69,12 +70,12 @@ def objective(args):
     dnn.adjustments = adjust_
     dnn.init_model(load=False)
     dnn.fit()
-    mse = dnn.loss
+    mse = np.clip(dnn.loss, 0., 1.)
 
     # see how many subjectively-good books it recommended
     df = books.copy()
     df['dist'] = dnn.predict()
-    df = df.sort_values('dist').iloc[:200]
+    df = df.sort_values('dist').iloc[:300]
     texts = df.title + df.text
     print(df.title.iloc[:50])
 
@@ -84,7 +85,7 @@ def objective(args):
         args[f"n_{k}"] = texts.apply(ct_match(adjusts[k])).sum()
     score = args['n_orig'] + args['n_mine_up'] - args['n_mine_down']\
         + args['n_other_up']/10 - args['n_other_down']/10
-    score = score + (1-np.clip(mse,0,1))*100
+    score = score - 10*np.log10(mse)
     args['score'] = score
     table.append(args)
 
@@ -110,14 +111,14 @@ space = {
     #     {'l2_n': False},
     #     {'l2_n': hp.uniform('l2_n', 0.1, 1.)}
     # ]),
-    'act': 'tanh', # hp.choice('act', ['elu', 'relu', 'tanh']),
+    'act': hp.choice('act', ['relu', 'elu', 'tanh']),
     # no relu, since even though we constrain cosine positive, the adjustments may become negative
     'final': 'linear',  # hp.choice('final', ['sigmoid', 'linear']),
-    'loss': 'mae', # hp.choice('loss', ['mse', 'mae']),
-    'batch': 128, # scope.int(hp.quniform('batch', 32, 512, 32)),
-    'bn': False, # hp.choice('bn', [True, False]),
-    'opt': 'adam', # hp.choice('opt', ['adam', 'nadam']),
-    'lr': .0002,  # hp.uniform('lr', .0001, .001),
+    'loss': hp.choice('loss', ['mse', 'mae']),
+    'batch': scope.int(hp.quniform('batch', 32, 512, 32)),
+    'bn': hp.choice('bn', [True, False]),
+    'opt': hp.choice('opt', ['adam', 'nadam']),
+    'lr': hp.uniform('lr', .0001, .001),
     'sample_weight': hp.uniform('sample_weight', 1., max_sample_weight),
     'std_mine': hp.uniform('std_mine', .01, 1.),
     'std_other': hp.uniform('std_other', .0, 1.)  # is multiplied by std_min
