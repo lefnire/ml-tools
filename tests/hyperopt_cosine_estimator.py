@@ -8,6 +8,11 @@ from hyperopt import hp
 from hyperopt.pyll import scope
 from hyperopt import fmin, tpe, space_eval
 
+import argparse
+parser = argparse.ArgumentParser()
+parser.add_argument('--winner', action='store_true', help='Just try winning hypers (1 run)')
+args_p = parser.parse_args()
+
 lhs = articles()
 lhs = Similars(lhs).embed().cluster(algo='agglomorative').value()
 
@@ -56,7 +61,9 @@ table, max_evals = [], 1000
 def objective(args):
     # first override the unecessary nesting, I don't like that
     for i in [0, 1, 2]:
-        args[f"l{i}"] = args[f"l{i}"][f"l{i}_n"]
+        k = f"l{i}"
+        if type(args[k]) == dict:
+            args[k] = args[k][f"{k}_n"]
     print(args)
 
 
@@ -73,9 +80,8 @@ def objective(args):
     mse = np.clip(dnn.loss, 0., 1.)
 
     # see how many subjectively-good books it recommended
-    df = books.copy()
-    df['dist'] = dnn.predict()
-    df = df.sort_values('dist').iloc[:300]
+    books['dist'] = dnn.predict()
+    df = books.sort_values('dist').iloc[:300]
     texts = df.title + df.text
     print(df.title.iloc[:50])
 
@@ -94,7 +100,8 @@ def objective(args):
     print(df.iloc[:5])
     print("All")
     print(df)
-    df.to_csv('./hypers.csv')
+    if not args_p.winner:
+        df.to_csv('./hypers.csv')
 
     return -score
 
@@ -124,9 +131,12 @@ space = {
     'std_other': hp.uniform('std_other', .0, 1.)  # is multiplied by std_min
 }
 
-# minimize the objective over the space
-best = fmin(objective, space, algo=tpe.suggest, max_evals=max_evals, show_progressbar=False)
-print(best)
-# -> {'a': 1, 'c2': 0.01420615366247227}
-print(space_eval(space, best))
-# -> ('case 2', 0.01420615366247227}
+if args_p.winner:
+    objective(dnn.hypers)
+else:
+    # minimize the objective over the space
+    best = fmin(objective, space, algo=tpe.suggest, max_evals=max_evals, show_progressbar=False)
+    print(best)
+    # -> {'a': 1, 'c2': 0.01420615366247227}
+    print(space_eval(space, best))
+    # -> ('case 2', 0.01420615366247227}

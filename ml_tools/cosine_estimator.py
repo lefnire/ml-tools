@@ -36,16 +36,18 @@ class CosineEstimator:
         """
         self.hypers = Box({
             'l0': .5,
-            'l1': .4,
+            'l1': False,
             'l2': False,
-            'act': 'tanh',
+            'act': 'elu',
             'final': 'linear',
             'loss': 'mae',
             'batch': 128,
             'bn': False,
-            'opt': 'adam',
+            'opt': 'nadam',
             'lr': .0002,
-            'sample_weight': 5.
+            'sample_weight': 100.,
+            'std_mine': .3,
+            'std_other': .3
         })
 
         self.lhs = lhs
