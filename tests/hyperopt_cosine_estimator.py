@@ -1,12 +1,10 @@
-import re, pdb
+import re, pdb, os
 from box import Box
 from ml_tools import CosineEstimator, Similars
 from ml_tools.fixtures import articles
 import numpy as np
 import pandas as pd
-from hyperopt import hp
-from hyperopt.pyll import scope
-from hyperopt import fmin, tpe, space_eval
+import optuna
 
 import argparse
 parser = argparse.ArgumentParser()
@@ -57,11 +55,13 @@ cw = class_weight.compute_sample_weight('balanced', (will_adjust != 0))
 max_sample_weight = cw.max() / cw.min()
 print('max_sample_weight', max_sample_weight)
 
+
 table, max_evals = [], 1000
-def objective(args):
+def objective_(args):
     # first override the unecessary nesting, I don't like that
     for i in [0, 1, 2]:
         k = f"l{i}"
+        if not args.get(k): continue
         if type(args[k]) == dict:
             args[k] = args[k][f"{k}_n"]
     print(args)
@@ -106,37 +106,32 @@ def objective(args):
     return -score
 
 # define a search space
-space = {
-    # actually comes through as {"l0": val}, see above
-    'l0': {'l0_n': hp.uniform('l0_n', 0.3, 1.)},
-    'l1': hp.choice('l1', [
-        {'l1_n': False},
-        {'l1_n': hp.uniform('l1_n', 0.1, 1.)}
-    ]),
-    'l2': {'l2_n': False},
-    # hp.choice('l2', [
-    #     {'l2_n': False},
-    #     {'l2_n': hp.uniform('l2_n', 0.1, 1.)}
-    # ]),
-    'act': 'elu', # hp.choice('act', ['relu', 'elu', 'tanh']),
+def objective(trial):
+    args = {}
+    layers = trial.suggest_int('layers', 1, 2)
+    for i in range(layers):
+        args[f"l{i}"] = trial.suggest_uniform(f"l{i}", .1, 1.)
+    if layers < 2: args['l1'] = False
+    if layers < 3: args['l2'] = False
+    args['act'] = 'elu' # hp.choice('act', ['relu', 'elu', 'tanh'])
     # no relu, since even though we constrain cosine positive, the adjustments may become negative
-    'final': hp.choice('final', ['sigmoid', 'linear']),
-    'loss': 'mae', # hp.choice('loss', ['mse', 'mae']),
-    'batch': scope.int(hp.quniform('batch', 32, 512, 32)),
-    'bn': False, # hp.choice('bn', [True, False]),
-    'opt': hp.choice('opt', ['sgd', 'nadam']),
-    'lr': hp.uniform('lr', .0001, .001),
-    'sample_weight': hp.uniform('sample_weight', 1., max_sample_weight),
-    'std_mine': hp.uniform('std_mine', .1, 1.),
-    'std_other': hp.uniform('std_other', .1, .6)  # is multiplied by std_min
-}
+    args['final'] = trial.suggest_categorical('final', ['sigmoid', 'linear'])
+    args['loss'] = 'mae' # hp.choice('loss', ['mse', 'mae'])
+    args['batch'] = int(trial.suggest_uniform('batch', 32, 512))
+    args['bn'] = False # hp.choice('bn', [True, False])
+    args['opt'] = trial.suggest_categorical('opt', ['sgd', 'nadam'])
+    args['lr'] = trial.suggest_uniform('lr', .0001, .001)
+    args['sample_weight'] = trial.suggest_uniform('sample_weight', 1., max_sample_weight)
+    args['std_mine'] = trial.suggest_uniform('std_mine', .1, 1.)
+    args['std_other'] = trial.suggest_uniform('std_other', .1, .6)  # is multiplied by std_min
+
+    # trial.set_user_attr('accuracy', accuracy)
+
+
+    return objective_(args)
 
 if args_p.winner:
-    objective(dnn.hypers)
+    objective_(dnn.hypers)
 else:
-    # minimize the objective over the space
-    best = fmin(objective, space, algo=tpe.suggest, max_evals=max_evals, show_progressbar=False)
-    print(best)
-    # -> {'a': 1, 'c2': 0.01420615366247227}
-    print(space_eval(space, best))
-    # -> ('case 2', 0.01420615366247227}
+    study = optuna.create_study(study_name='study1', storage=os.getenv("DB_URL", None), load_if_exists=True)
+    study.optimize(objective, n_trials=max_evals)
