@@ -89,9 +89,9 @@ def objective(args):
     args['n_orig'] = texts.apply(ct_match(adjusts.entries)).sum()
     for k in ['mine_up', 'mine_down', 'other_up', 'other_down']:
         args[f"n_{k}"] = texts.apply(ct_match(adjusts[k])).sum()
-    score = args['n_orig'] + args['n_mine_up'] - args['n_mine_down']\
+    score = args['n_orig'] + args['n_mine_up']*.75 - args['n_mine_down']\
         + args['n_other_up']/10 - args['n_other_down']/10
-    score = score - 10*np.log10(mse)
+    #score = score - 10*np.log10(mse)
     args['score'] = score
     table.append(args)
 
@@ -108,7 +108,7 @@ def objective(args):
 # define a search space
 space = {
     # actually comes through as {"l0": val}, see above
-    'l0': {'l0_n': hp.uniform('l0_n', 0.1, 1.)},
+    'l0': {'l0_n': hp.uniform('l0_n', 0.3, 1.)},
     'l1': hp.choice('l1', [
         {'l1_n': False},
         {'l1_n': hp.uniform('l1_n', 0.1, 1.)}
@@ -118,17 +118,17 @@ space = {
     #     {'l2_n': False},
     #     {'l2_n': hp.uniform('l2_n', 0.1, 1.)}
     # ]),
-    'act': hp.choice('act', ['relu', 'elu', 'tanh']),
+    'act': 'elu', # hp.choice('act', ['relu', 'elu', 'tanh']),
     # no relu, since even though we constrain cosine positive, the adjustments may become negative
-    'final': 'linear',  # hp.choice('final', ['sigmoid', 'linear']),
-    'loss': hp.choice('loss', ['mse', 'mae']),
+    'final': hp.choice('final', ['sigmoid', 'linear']),
+    'loss': 'mae', # hp.choice('loss', ['mse', 'mae']),
     'batch': scope.int(hp.quniform('batch', 32, 512, 32)),
-    'bn': hp.choice('bn', [True, False]),
-    'opt': hp.choice('opt', ['adam', 'nadam']),
+    'bn': False, # hp.choice('bn', [True, False]),
+    'opt': hp.choice('opt', ['sgd', 'nadam']),
     'lr': hp.uniform('lr', .0001, .001),
     'sample_weight': hp.uniform('sample_weight', 1., max_sample_weight),
-    'std_mine': hp.uniform('std_mine', .01, 1.),
-    'std_other': hp.uniform('std_other', .0, 1.)  # is multiplied by std_min
+    'std_mine': hp.uniform('std_mine', .1, 1.),
+    'std_other': hp.uniform('std_other', .1, .6)  # is multiplied by std_min
 }
 
 if args_p.winner:

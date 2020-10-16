@@ -8,7 +8,7 @@ from tensorflow.keras import backend as K
 from tensorflow.keras.layers import Input, Dense, BatchNormalization
 from tensorflow.keras.models import Model, load_model
 from tensorflow.keras.callbacks import EarlyStopping
-from tensorflow.keras.optimizers import Adam, Nadam
+from tensorflow.keras.optimizers import SGD, Nadam
 from tensorflow.keras.utils import Sequence
 
 import pdb, logging, math, re
@@ -44,10 +44,10 @@ class CosineEstimator:
             'batch': 128,
             'bn': False,
             'opt': 'nadam',
-            'lr': .0002,
-            'sample_weight': 100.,
-            'std_mine': .3,
-            'std_other': .3
+            'lr': .0005,
+            'sample_weight': 150.,
+            'std_mine': .4,
+            'std_other': .2
         })
 
         self.lhs = lhs
@@ -96,10 +96,11 @@ class CosineEstimator:
         # http://zerospectrum.com/2019/06/02/mae-vs-mse-vs-rmse/
         # MAE because we _want_ outliers (user score adjustments)
         loss = 'binary_crossentropy' if h.final == 'sigmoid' else h.loss
-        opt = Nadam if h.opt == 'nadam' else Adam
+        opt = Nadam(learning_rate=h.lr) if h.opt == 'nadam'\
+            else SGD(lr=h.lr, momentum=0.9, decay=0.01, nesterov=True)
         m.compile(
             loss=loss,
-            optimizer=opt(learning_rate=h.lr),
+            optimizer=opt,
         )
         m.summary()
         self.model = m
@@ -124,6 +125,8 @@ class CosineEstimator:
             logger.info("Using sample weight")
             adjustments = adjustments[shuff]
             y = y - adjustments
+            if self.hypers.final == 'sigmoid':
+                y = np.clip(y, 0., 1.)
             sw = np.ones(y.shape[0])
             sw[adjustments != 0] = sample_weight
             extra['sample_weight'] = sw
