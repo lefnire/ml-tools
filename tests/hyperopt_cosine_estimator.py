@@ -19,33 +19,42 @@ books = pd.read_feather('/storage/libgen/testing.df')
 
 dnn = CosineEstimator(lhs, rhs)
 
-adjusts = Box(
+votes = Box(
+    mine_up= r"tensorflow|keras",
+    other_up=r"(cookbook|recipes)"
+)
+votes.update(
+    mine_down=votes.other_up,
+    other_down=votes.mine_up
+)
+searches = Box(
     entries=r"(cbt|virtual|cognitive)",
-    mine_up= r"(python|javascript|tensorflow)",
-    mine_down=r"(america|politics|united states)",
+    mine_up= r"(python|tensorflow|machine learning|keras|pytorch|scikit|pandas)",
+    other_up=r"(cook|recipes|comfort food|meal)",
 )
-adjusts.update(
-    other_up=r"(president|trump|elections|fitness|gym|exercise)",
-    other_down=r"(python|javascript|astrology|moon)"
+searches.update(
+    mine_down=searches.other_up,
+    other_down=searches.mine_up
 )
+
 vote_ct = 100
 def adjust(k, std):
     ct = 0
     def adjust_(text):
         nonlocal ct
         if ct > vote_ct: return 0.
-        res = std if re.search(adjusts[f"{k}_up"], text, re.IGNORECASE)\
-            else -std if re.search(adjusts[f"{k}_down"], text, re.IGNORECASE)\
+        v = std if re.search(votes[f"{k}_up"], text, re.IGNORECASE)\
+            else -std if re.search(votes[f"{k}_down"], text, re.IGNORECASE)\
             else 0.
-        if res: ct += 1
-        return res
+        if v: ct += 1
+        return v
     return adjust_
 all_txt = (books.title + books.text)
 
 
-def ct_match(regex):
+def ct_match(k):
     def ct_match_(txt):
-        return 1 if re.search(regex, txt, re.IGNORECASE) else 0
+        return 1 if re.search(searches[k], txt, re.IGNORECASE) else 0
     return ct_match_
 
 from sklearn.utils import class_weight
@@ -56,24 +65,31 @@ max_sample_weight = cw.max() / cw.min()
 print('max_sample_weight', max_sample_weight)
 
 
-table, max_evals = [], 1000
-def objective_(args):
-    # first override the unecessary nesting, I don't like that
-    for i in [0, 1, 2]:
-        k = f"l{i}"
-        if not args.get(k): continue
-        if type(args[k]) == dict:
-            args[k] = args[k][f"{k}_n"]
-    print(args)
+max_evals = 1000
+def objective(trial):
+    h = Box({})
+    h['layers'] = trial.suggest_int('layers', 1, 2)
+    for i in range(h.layers):
+        h[f"l{i}"] = trial.suggest_uniform(f"l{i}", .1, 1.)
+    h['act'] = 'elu'  # hp.choice('act', ['relu', 'elu', 'tanh'])
+    # no relu, since even though we constrain cosine positive, the adjustments may become negative
+    h['final'] = trial.suggest_categorical('final', ['sigmoid', 'linear'])
+    h['loss'] = 'mae'  # hp.choice('loss', ['mse', 'mae'])
+    h['batch'] = int(trial.suggest_uniform('batch', 32, 512))
+    h['bn'] = False  # hp.choice('bn', [True, False])
+    h['opt'] = trial.suggest_categorical('opt', ['sgd', 'nadam'])
+    h['lr'] = trial.suggest_uniform('lr', .0001, .001)
+    h['sample_weight'] = trial.suggest_uniform('sample_weight', 1., max_sample_weight)
+    h['std_mine'] = trial.suggest_uniform('std_mine', .1, 1.)
+    h['std_other'] = trial.suggest_uniform('std_other', .1, .6)  # is multiplied by std_min
 
-
-    std_mine, std_other = args['std_mine'], args['std_mine'] * args['std_other']
-    adjust_mine = all_txt.apply(adjust('mine', std_mine))
+    std_other = h.std_mine * h.std_other
+    adjust_mine = all_txt.apply(adjust('mine', h.std_mine))
     # start from other end so there's no overlap
     adjust_other = all_txt[::-1].apply(adjust('other', std_other))[::-1]
     adjust_ = (adjust_mine + adjust_other).values
 
-    dnn.hypers = Box(args)
+    dnn.hypers = Box(h)
     dnn.adjustments = adjust_
     dnn.init_model(load=False)
     dnn.fit()
@@ -85,53 +101,22 @@ def objective_(args):
     texts = df.title + df.text
     print(df.title.iloc[:50])
 
-    args['mse'] = mse
-    args['n_orig'] = texts.apply(ct_match(adjusts.entries)).sum()
+    cts = Box({})
+    cts['orig'] = texts.apply(ct_match('entries')).sum()
     for k in ['mine_up', 'mine_down', 'other_up', 'other_down']:
-        args[f"n_{k}"] = texts.apply(ct_match(adjusts[k])).sum()
-    score = args['n_orig'] + args['n_mine_up']*.75 - args['n_mine_down']\
-        + args['n_other_up']/10 - args['n_other_down']/10
+        cts[k] = texts.apply(ct_match(k)).sum()
+    score = cts.orig + cts.mine_up*.75 - cts.mine_down\
+        + cts.other_up*.1 - cts.other_down*.1
+    trial.set_user_attr('mse', float(mse))
+    for k, v in cts.items():
+        trial.set_user_attr(k, float(v))
     #score = score - 10*np.log10(mse)
-    args['score'] = score
-    table.append(args)
-
-    df = pd.DataFrame(table).sort_values('score', ascending=False)
-    print(f"Top 5 ({df.shape[0]}/{max_evals})")
-    print(df.iloc[:5])
-    print("All")
-    print(df)
-    if not args_p.winner:
-        df.to_csv('./hypers.csv')
 
     return -score
 
-# define a search space
-def objective(trial):
-    args = {}
-    layers = trial.suggest_int('layers', 1, 2)
-    for i in range(layers):
-        args[f"l{i}"] = trial.suggest_uniform(f"l{i}", .1, 1.)
-    if layers < 2: args['l1'] = False
-    if layers < 3: args['l2'] = False
-    args['act'] = 'elu' # hp.choice('act', ['relu', 'elu', 'tanh'])
-    # no relu, since even though we constrain cosine positive, the adjustments may become negative
-    args['final'] = trial.suggest_categorical('final', ['sigmoid', 'linear'])
-    args['loss'] = 'mae' # hp.choice('loss', ['mse', 'mae'])
-    args['batch'] = int(trial.suggest_uniform('batch', 32, 512))
-    args['bn'] = False # hp.choice('bn', [True, False])
-    args['opt'] = trial.suggest_categorical('opt', ['sgd', 'nadam'])
-    args['lr'] = trial.suggest_uniform('lr', .0001, .001)
-    args['sample_weight'] = trial.suggest_uniform('sample_weight', 1., max_sample_weight)
-    args['std_mine'] = trial.suggest_uniform('std_mine', .1, 1.)
-    args['std_other'] = trial.suggest_uniform('std_other', .1, .6)  # is multiplied by std_min
-
-    # trial.set_user_attr('accuracy', accuracy)
-
-
-    return objective_(args)
-
 if args_p.winner:
-    objective_(dnn.hypers)
+    raise Exception("Won't work after Optuna conversion, fix this.")
+    objective(dnn.hypers)
 else:
-    study = optuna.create_study(study_name='study1', storage=os.getenv("DB_URL", None), load_if_exists=True)
+    study = optuna.create_study(study_name='study2', storage=os.getenv("DB_URL", None), load_if_exists=True)
     study.optimize(objective, n_trials=max_evals)

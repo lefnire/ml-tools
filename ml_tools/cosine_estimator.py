@@ -9,15 +9,12 @@ from tensorflow.keras.layers import Input, Dense, BatchNormalization
 from tensorflow.keras.models import Model, load_model
 from tensorflow.keras.callbacks import EarlyStopping
 from tensorflow.keras.optimizers import SGD, Nadam
-from tensorflow.keras.utils import Sequence
 
 import pdb, logging, math, re
-from tqdm import tqdm
 from os.path import exists
 from box import Box
 from ml_tools import Similars
 import numpy as np
-import pandas as pd
 logger = logging.getLogger(__name__)
 
 
@@ -34,21 +31,20 @@ class CosineEstimator:
         :param rhs: right-hand-side, ie the database/corpus/index you'll be comparing things against later. Usually
             this will be the much larger of the two matrices in a comparison.
         """
-        self.hypers = Box({
-            'l0': .5,
-            'l1': False,
-            'l2': False,
-            'act': 'elu',
-            'final': 'linear',
-            'loss': 'mae',
-            'batch': 128,
-            'bn': False,
-            'opt': 'nadam',
-            'lr': .0005,
-            'sample_weight': 150.,
-            'std_mine': .4,
-            'std_other': .2
-        })
+        self.hypers = Box(
+            layers=1,
+            l0=.5,
+            act='elu',
+            final='linear',
+            loss='mae',
+            batch=128,
+            bn=False,
+            opt='nadam',
+            lr=.0005,
+            sample_weight=150.,
+            std_mine=.4,
+            std_other=.2
+        )
 
         self.lhs = lhs
         self.rhs = rhs
@@ -81,10 +77,8 @@ class CosineEstimator:
         input = Input(shape=(dims,))
         m = input
         last_dim = dims
-        for i in [0,1,2]:
-            d = h[f"l{i}"]
-            if not d: continue
-            d = math.ceil(d * last_dim)
+        for i in range(h.layers):
+            d = math.ceil(h[f"l{i}"] * last_dim)
             last_dim = d
             kwargs = dict(activation=h.act)
             kwargs['kernel_initializer'] = 'glorot_uniform' \
@@ -113,19 +107,17 @@ class CosineEstimator:
         else:
             logger.info("DNN: learn cosine function")
 
-        # https://www.machinecurve.com/index.php/2020/04/06/using-simple-generators-to-flow-data-from-file-with-keras/
-        # https://www.tensorflow.org/api_docs/python/tf/keras/Model#fit
-        batch_size = int(self.hypers.batch)
         shuff = permute(self.y)
         x, y = self.rhs[shuff], self.y[shuff]
 
+        h = self.hypers
         extra = {}
-        sample_weight, adjustments = self.hypers.sample_weight, self.adjustments
+        sample_weight, adjustments = h.sample_weight, self.adjustments
         if sample_weight and adjustments is not None and adjustments.any():
             logger.info("Using sample weight")
             adjustments = adjustments[shuff]
             y = y - adjustments
-            if self.hypers.final == 'sigmoid':
+            if h.final == 'sigmoid':
                 y = np.clip(y, 0., 1.)
             sw = np.ones(y.shape[0])
             sw[adjustments != 0] = sample_weight
@@ -136,7 +128,7 @@ class CosineEstimator:
             **extra,
             epochs=50,
             callbacks=[self.es],
-            batch_size=batch_size,
+            batch_size=h.batch,
             shuffle=True,
             validation_split=.3
         )
