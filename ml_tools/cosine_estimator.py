@@ -33,18 +33,22 @@ class CosineEstimator:
         """
         self.hypers = Box(
             layers=1,
-            l0=.5,
+            l0=.32,
             act='elu',
             final='linear',
-            loss='mae',
-            batch=128,
-            bn=False,
+            loss='mse',
+            batch=224,
+            bn=True,
             opt='nadam',
-            lr=.0005,
-            sample_weight=150.,
-            std_mine=.4,
-            std_other=.2
+            lr=.0004,
+            sample_weight=2.,
+            std_mine=.183,
+            std_other=.307,
+            normalize=True
         )
+
+        if self.hypers.normalize:
+            lhs, rhs = Similars(lhs, rhs).normalize().value()
 
         self.lhs = lhs
         self.rhs = rhs
@@ -61,8 +65,11 @@ class CosineEstimator:
         lhs, rhs = self.lhs, self.rhs
         batch = 100
         for i in range(0, rhs.shape[0], batch):
-            yield Similars(lhs, rhs[i:i+batch]).normalize()\
-                .cosine(abs=True).value().min(axis=0).squeeze()
+            c = Similars(lhs, rhs[i:i+batch])
+            if not self.hypers.normalize:
+                # don't double-normalize; but do normalize here if not already done
+                c = c.normalize()
+            yield c.cosine(abs=True).value().min(axis=0).squeeze()
 
     def init_model(self, load=True):
         if load and self.filename and exists(self.filename):
@@ -84,7 +91,9 @@ class CosineEstimator:
             kwargs['kernel_initializer'] = 'glorot_uniform' \
                 if h.act == 'tanh' else 'he_uniform'
             m = Dense(d, **kwargs)(m)
-            if h.bn: m = BatchNormalization()(m)
+            # Don't apply batchnorm to the last hidden layer
+            if h.bn and i < h.layers-1:
+                m = BatchNormalization()(m)
         m = Dense(1, activation=h.final)(m)
         m = Model(input, m)
         # http://zerospectrum.com/2019/06/02/mae-vs-mse-vs-rmse/
@@ -107,10 +116,11 @@ class CosineEstimator:
         else:
             logger.info("DNN: learn cosine function")
 
+        h = self.hypers
+
         shuff = permute(self.y)
         x, y = self.rhs[shuff], self.y[shuff]
 
-        h = self.hypers
         extra = {}
         sample_weight, adjustments = h.sample_weight, self.adjustments
         if sample_weight and adjustments is not None and adjustments.any():

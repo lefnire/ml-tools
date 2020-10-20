@@ -9,6 +9,7 @@ import optuna
 import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument('--winner', action='store_true', help='Just try winning hypers (1 run)')
+parser.add_argument('--dump', action='store_true', help='Dump results to DB')
 args_p = parser.parse_args()
 
 lhs = articles()
@@ -16,25 +17,24 @@ lhs = Similars(lhs).embed().cluster(algo='agglomorative').value()
 
 rhs = np.load('/storage/libgen/testing.npy') #, mmap_mode='r')
 books = pd.read_feather('/storage/libgen/testing.df')
+rhs_norm = Similars(rhs).normalize().value()
 
 dnn = CosineEstimator(lhs, rhs)
 
 votes = Box(
-    mine_up= r"tensorflow|keras",
-    other_up=r"(cookbook|recipes)"
+    mine_up= r"(tensorflow|keras)",
+    other_up=r"(cookbook|recipe)",
+    other_down=r"(artificial|\bai\b|python|java|cbt|cognitive behavior)"
 )
-votes.update(
-    mine_down=votes.other_up,
-    other_down=votes.mine_up
-)
+votes['mine_down'] = votes.other_up
 searches = Box(
-    entries=r"(cbt|virtual|cognitive)",
-    mine_up= r"(python|tensorflow|machine learning|keras|pytorch|scikit|pandas)",
-    other_up=r"(cook|recipes|comfort food|meal)",
+    entries=r"(virtual|\bvr\b|cognitive|therap|cbt|dbt|dialectical)",
+    mine_up= r"(python|tensorflow|machine learn|keras|pytorch|scikit|pandas|artificial|\bai\b)",
+    other_up=r"(cook|recipe|comfort food|meal)",
 )
 searches.update(
     mine_down=searches.other_up,
-    other_down=searches.mine_up
+    other_down=votes.other_down
 )
 
 vote_ct = 100
@@ -57,12 +57,13 @@ def ct_match(k):
         return 1 if re.search(searches[k], txt, re.IGNORECASE) else 0
     return ct_match_
 
-from sklearn.utils import class_weight
-will_adjust = np.zeros(rhs.shape[0])
-will_adjust[:vote_ct*2] = np.ones(vote_ct*2)
-cw = class_weight.compute_sample_weight('balanced', (will_adjust != 0))
-max_sample_weight = cw.max() / cw.min()
-print('max_sample_weight', max_sample_weight)
+# from sklearn.utils import class_weight
+# will_adjust = np.zeros(rhs.shape[0])
+# will_adjust[:vote_ct*2] = np.ones(vote_ct*2)
+# cw = class_weight.compute_sample_weight('balanced', (will_adjust != 0))
+# max_sample_weight = cw.max() / cw.min()
+# print('max_sample_weight', max_sample_weight)
+max_sample_weight = 500.
 
 
 max_evals = 1000
@@ -73,15 +74,18 @@ def objective(trial):
         h[f"l{i}"] = trial.suggest_uniform(f"l{i}", .1, 1.)
     h['act'] = 'elu'  # hp.choice('act', ['relu', 'elu', 'tanh'])
     # no relu, since even though we constrain cosine positive, the adjustments may become negative
-    h['final'] = trial.suggest_categorical('final', ['sigmoid', 'linear'])
-    h['loss'] = 'mae'  # hp.choice('loss', ['mse', 'mae'])
-    h['batch'] = int(trial.suggest_uniform('batch', 32, 512))
-    h['bn'] = False  # hp.choice('bn', [True, False])
-    h['opt'] = trial.suggest_categorical('opt', ['sgd', 'nadam'])
-    h['lr'] = trial.suggest_uniform('lr', .0001, .001)
-    h['sample_weight'] = trial.suggest_uniform('sample_weight', 1., max_sample_weight)
-    h['std_mine'] = trial.suggest_uniform('std_mine', .1, 1.)
-    h['std_other'] = trial.suggest_uniform('std_other', .1, .6)  # is multiplied by std_min
+    h['final'] = 'linear' # trial.suggest_categorical('final', ['sigmoid', 'linear'])
+    h['loss'] = trial.suggest_categorical('loss', ['mse', 'mae'])
+    h['batch'] = 224 # int(trial.suggest_uniform('batch', 32, 512))
+    h['bn'] = True # trial.suggest_categorical('bn', [True, False])
+    h['normalize'] = True  # trial.suggest_categorical('normalize', [True, False])
+    h['opt'] = 'nadam' # trial.suggest_categorical('opt', ['sgd', 'nadam'])
+    h['lr'] = .0004 # trial.suggest_uniform('lr', .0001, .001)
+    h['sample_weight'] = 2. # trial.suggest_uniform('sample_weight', 1., max_sample_weight)
+    h['std_mine'] = .187  # trial.suggest_uniform('std_mine', .1, 1.)
+    h['std_other'] = .307  # trial.suggest_uniform('std_other', .1, .6)  # is multiplied by std_min
+
+    print(h)
 
     std_other = h.std_mine * h.std_other
     adjust_mine = all_txt.apply(adjust('mine', h.std_mine))
@@ -89,7 +93,9 @@ def objective(trial):
     adjust_other = all_txt[::-1].apply(adjust('other', std_other))[::-1]
     adjust_ = (adjust_mine + adjust_other).values
 
+
     dnn.hypers = Box(h)
+    dnn.rhs = rhs_norm if h.normalize else rhs
     dnn.adjustments = adjust_
     dnn.init_model(load=False)
     dnn.fit()
@@ -105,18 +111,30 @@ def objective(trial):
     cts['orig'] = texts.apply(ct_match('entries')).sum()
     for k in ['mine_up', 'mine_down', 'other_up', 'other_down']:
         cts[k] = texts.apply(ct_match(k)).sum()
-    score = cts.orig + cts.mine_up*.75 - cts.mine_down\
+    score = cts.orig + cts.mine_up * 1.1 - cts.mine_down\
         + cts.other_up*.1 - cts.other_down*.1
     trial.set_user_attr('mse', float(mse))
     for k, v in cts.items():
         trial.set_user_attr(k, float(v))
-    #score = score - 10*np.log10(mse)
+    score = score - 10*np.log10(mse)
 
     return -score
 
 if args_p.winner:
+    # https://blog.devart.com/pivot-tables-in-postgresql.html
     raise Exception("Won't work after Optuna conversion, fix this.")
     objective(dnn.hypers)
-else:
-    study = optuna.create_study(study_name='study2', storage=os.getenv("DB_URL", None), load_if_exists=True)
+    exit(0)
+
+STUDY = "study9"
+DB = os.getenv("DB_URL", None)
+study = optuna.create_study(study_name=STUDY, storage=DB, load_if_exists=True)
+if not args_p.dump:
     study.optimize(objective, n_trials=max_evals)
+
+from sqlalchemy import create_engine
+engine = create_engine(DB)
+df = study.trials_dataframe(attrs=('value', 'params', 'user_attrs')).sort_values("value")
+for c in df.columns:
+    df.rename(columns={c: re.sub(r"(user_attrs_|params_)", "", c)}, inplace=True)
+df.to_sql(f"results_{STUDY}", engine, if_exists="replace")
