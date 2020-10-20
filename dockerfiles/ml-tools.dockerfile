@@ -11,11 +11,11 @@ RUN \
   xgboost \
   sklearn \
   scipy \
-  git+git://github.com/hyperopt/hyperopt.git@0.2.5 \
+  optuna \
   kneed \
   # CleanText
   beautifulsoup4 \
-  markdown \
+  markdown2 \
   markdownify \
   html5lib \
   textacy \
@@ -26,4 +26,4 @@ RUN \
   gensim
 
 # TODO move this to /storage setup
-RUN python -m spacy download en_core_web_sm
+RUN python -m spacy download en

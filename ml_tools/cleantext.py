@@ -20,12 +20,8 @@ import spacy
 if SPACY_GPU:
     spacy.prefer_gpu()
 
-nlp_fast = None
-def init_nlp_fast():
-    global nlp_fast
-    import lemminflect  # just import. Ties itself into spacy internals
-    nlp_fast = spacy.load('en_core_web_sm', disable=['parser', 'ner'])
-
+import lemminflect  # just import. Ties itself into spacy internals
+nlp_fast = spacy.load('en', disable=['parser', 'ner'])
 
 # Much slower, but maybe more robust (see t.ent_type_ below)
 NER = False
@@ -45,9 +41,9 @@ def init_nlp_accurate():
     nlp_accurate = StanzaLanguage(snlp)
 
 
-# TODO use RE_PUNCT inserts for proper punctuation handling. See gensim.parsing.preprocessing.RE_PUNCT
+# See gensim.parsing.preprocessing.RE_PUNCT
 # RE_PUNCT = re.compile(r'([%s])+' % re.escape(string.punctuation), re.UNICODE)
-RE_PUNCT = "[.,!;?]"
+RE_PUNCT = r'[%s]' % re.escape(string.punctuation)
 
 
 def mult_whitespace(s):
@@ -58,31 +54,12 @@ def resub(pattern, replace_with, txt):
     return re.sub(pattern, replace_with, txt, flags=re.IGNORECASE)
 
 
-# https://stackoverflow.com/a/54923798/362790
-from markdown import Markdown
-from io import StringIO
-from markdownify import markdownify  # html2md
-def __unmark_element(element, stream=None):
-    if stream is None:
-        stream = StringIO()
-    if element.text:
-        stream.write(element.text)
-    for sub in element:
-        __unmark_element(sub, stream)
-    if element.tail:
-        stream.write(element.tail)
-    return stream.getvalue()
-# patching Markdown
-Markdown.output_formats["plain"] = __unmark_element
-__md = Markdown(output_format="plain")
-__md.stripTopLevelTags = False
-
-
+from markdown2 import Markdown
+md = Markdown(extras=["cuddled-lists"])
 def md2txt(s):
-    # return html2txt(md.convert(s))
-    return __md.convert(s)
+    return html2txt(md.convert(s))
 
-
+from markdownify import markdownify
 def html2md(s):
     return markdownify(s)
 
@@ -153,8 +130,11 @@ class CleanText:
         return s
 
     @staticmethod
-    def ends_w_punct(s):
-        return re.search(rf"{RE_PUNCT}$", s)
+    def ensure_punct(s):
+        s = s.strip()
+        if not re.search(rf"{RE_PUNCT}$", s):
+            s += "."
+        return s
 
     @one_or_many()
     def strip_html(self, s):
@@ -202,63 +182,36 @@ class CleanText:
 
         return s
 
-    def __is_markdown_block(self, i, lines):
-        s = lines[i]
-        s_next = lines[i+1] if i+1 < len(lines) else ''
-        RE_LI =  r"^\s*([*\-+]|[0-9]+\.)"
-        is_block = False
-
-        # heading
-        if re.search(r"^[#]+", s):
-            is_block = True
-            end_with = "."
-        # li (come before UL for inline replacement)
-        elif re.search(RE_LI, s):
-            s = re.sub("^\s*", "", s)  # unmark doesn't like spaces before li's
-            is_block = True
-            end_with = ";"
-        # ul
-        elif re.search(RE_LI, s_next):
-            is_block = True
-            end_with = ":"
-
-        if not is_block: return False, ""
-        s = md2txt(s)
-        s = s if self.ends_w_punct(s) else s + end_with
-        return True, s
-
     @one_or_many(batch=True)
     def markdown_split_paragraphs(self, docs):
-        # Convert doc(s) into paragraphs. Do some basic cleanup
+        # Convert doc(s) into paragraphs.
         paras = []
-        def clean_append(p):
-            p = CleanText(p).unmark().fix_punct().only_ascii().multiple_whitespace().value()
-            if not self.ends_w_punct(p):
-                p = p + "."
-            paras.append(p)
+        for doc in docs:
+            soup = BeautifulSoup(md.convert(doc), "html5lib")\
+                .find("body").findChildren(recursive=False)
+            last_tag = ""
+            for t in soup:
+                tag, text = t.name, t.text
+                if not text: continue
+                text = ' '.join([
+                    self.ensure_punct(line)
+                    for line in text.split('\n')
+                    if line
+                ])
+                start_new = not paras or\
+                    tag.startswith('h') or\
+                    (tag == 'p' and not last_tag.startswith('h'))
+                if start_new:
+                    paras.append(text)
+                else:
+                    paras[-1] += " " + text
+                last_tag = tag
 
-        docs = "\n\n".join(docs)
-        lines = re.split('\n+', docs)
-        block_agg = []
-        for i, line in enumerate(lines):
-            # For consistent markdown blocks (title, list-header, list-items) group them all into one paragraph.
-            # Once no more block detected, bust it.
-            is_block, block_txt = self.__is_markdown_block(i, lines)
-            if is_block:
-                block_agg.append(block_txt)
-                continue
-            elif len(block_agg) > 0:
-                block = " ".join(block_agg)
-                block_agg.clear()
-                clean_append(block)
-            clean_append(line)
         return paras
 
     # You'll never really call this on a single doc, so one_or_many is pointless; just error-preventing
     @staticmethod
     def _keywords_fast(pbar, docs, postags):
-        if nlp_fast is None: init_nlp_fast()
-
         clean = []
         for doc in nlp_fast.pipe(docs):
             assert doc, "keywords() got empty document. This should be handled in @wrapper"
