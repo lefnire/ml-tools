@@ -8,13 +8,14 @@ from tensorflow.keras import backend as K
 from tensorflow.keras.layers import Input, Dense, BatchNormalization
 from tensorflow.keras.models import Model, load_model
 from tensorflow.keras.callbacks import EarlyStopping
-from tensorflow.keras.optimizers import SGD, Nadam
+from tensorflow.keras.optimizers import SGD, Nadam, Adam
 
 import pdb, logging, math, re
 from os.path import exists
 from box import Box
 from ml_tools import Similars
 import numpy as np
+from typing import List
 logger = logging.getLogger(__name__)
 
 
@@ -26,25 +27,35 @@ class CosineEstimator:
     Neural network that learns the cosine DISTANCE function (between 0-1, 0 being similar, 1 being distant). Also
     allows fine-tuning adjustments of those similarities, eg in the case of user-ratings on documents (embedded).
     """
-    def __init__(self, lhs, rhs, adjustments=None, filename=None):
+    def __init__(
+        self,
+        lhs: np.ndarray,
+        rhs: np.ndarray,
+        adjustments: List = [],
+        filename: str = None
+    ):
         """
-        :param rhs: right-hand-side, ie the database/corpus/index you'll be comparing things against later. Usually
-            this will be the much larger of the two matrices in a comparison.
+
+        :param lhs: left-hand-side, a small-ish corpus you want to find most similar documents to
+        :param rhs: right-hand-side, a large database/corpus/index you want the most-similar documents from
+        :param adjustments: a list of dict(amount,weight,values).
+            * amount(float): the amount you want to adjust similarity-score by. Generally range .1-.3 (think in terms of
+                standard deviations). .3 is a good number
+            * weight(float): how much to weight the network on these adjusted values? Uses tf.sample_weight. Try 50.
+            * values(np.ndarray): array of rows which will be multiplied by amount (values*amount). Make everything
+                zero except for the rows you want adjusted, which should probably be 1. `arr=np.zeros(); arr[mask] = 1.`
+        :param filename: if you want to save/load the trained model, specify a filename
         """
         self.hypers = Box(
-            layers=1,
-            l0=.32,
-            act='elu',
-            final='linear',
-            loss='mse',
-            batch=224,
-            bn=True,
-            opt='nadam',
-            lr=.0004,
-            sample_weight=2.,
-            std_mine=.183,
-            std_other=.307,
-            normalize=True
+            layers=1, # winner=1
+            l0=.65,  # winner=.65
+            act='relu',  # winner=relu
+            loss='mae',  # winner=mae
+            batch=324,  # winner=324
+            bn=True,  # inconclusive
+            opt='nadam',  # winner=nadam (TODO try AdamW)
+            lr=.0004,  # winner=.0004
+            normalize=False  # inconclusive
         )
 
         if self.hypers.normalize:
@@ -94,15 +105,15 @@ class CosineEstimator:
             # Don't apply batchnorm to the last hidden layer
             if h.bn and i < h.layers-1:
                 m = BatchNormalization()(m)
-        m = Dense(1, activation=h.final)(m)
+        m = Dense(1, activation='linear')(m)
         m = Model(input, m)
         # http://zerospectrum.com/2019/06/02/mae-vs-mse-vs-rmse/
         # MAE because we _want_ outliers (user score adjustments)
-        loss = 'binary_crossentropy' if h.final == 'sigmoid' else h.loss
         opt = Nadam(learning_rate=h.lr) if h.opt == 'nadam'\
+            else Adam(learning_rate=h.lr, amsgrad=True) if 'amsgrad'\
             else SGD(lr=h.lr, momentum=0.9, decay=0.01, nesterov=True)
         m.compile(
-            loss=loss,
+            loss=h.loss,
             optimizer=opt,
         )
         m.summary()
@@ -115,27 +126,21 @@ class CosineEstimator:
             return
         else:
             logger.info("DNN: learn cosine function")
-
         h = self.hypers
 
-        shuff = permute(self.y)
+        shuff = permute(self.y)  # TODO stratify on adjustments (since rare)
         x, y = self.rhs[shuff], self.y[shuff]
 
-        extra = {}
-        sample_weight, adjustments = h.sample_weight, self.adjustments
-        if sample_weight and adjustments is not None and adjustments.any():
-            logger.info("Using sample weight")
-            adjustments = adjustments[shuff]
-            y = y - adjustments
-            if h.final == 'sigmoid':
-                y = np.clip(y, 0., 1.)
-            sw = np.ones(y.shape[0])
-            sw[adjustments != 0] = sample_weight
-            extra['sample_weight'] = sw
+        sample_weight = np.ones(y.shape[0])
+        for adj in self.adjustments:
+            vals = adj['values'][shuff]
+            y = y - vals * adj['amount']
+            mask = vals != 0
+            sample_weight[mask] = np.maximum(sample_weight[mask], adj['weight'])
 
         history = self.model.fit(
             x, y,
-            **extra,
+            sample_weight=sample_weight,
             epochs=30,
             callbacks=[self.es],
             batch_size=h.batch,

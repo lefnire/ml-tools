@@ -38,13 +38,13 @@ searches.update(
 )
 
 vote_ct = 200
-def adjust(k, std):
+def adjust(k):
     ct = 0
     def adjust_(text):
         nonlocal ct
         if ct > vote_ct: return 0.
-        v = std if re.search(votes[f"{k}_up"], text, re.IGNORECASE)\
-            else -std if re.search(votes[f"{k}_down"], text, re.IGNORECASE)\
+        v = 1. if re.search(votes[f"{k}_up"], text, re.IGNORECASE)\
+            else -1. if re.search(votes[f"{k}_down"], text, re.IGNORECASE)\
             else 0.
         if v: ct += 1
         return v
@@ -63,7 +63,7 @@ def ct_match(k):
 # cw = class_weight.compute_sample_weight('balanced', (will_adjust != 0))
 # max_sample_weight = cw.max() / cw.min()
 # print('max_sample_weight', max_sample_weight)
-max_sample_weight = 500.
+max_sample_weight = 100.
 
 
 max_evals = 1000
@@ -72,34 +72,31 @@ def objective(trial):
     h['layers'] = trial.suggest_int('layers', 1, 2)
     for i in range(h.layers):
         h[f"l{i}"] = trial.suggest_uniform(f"l{i}", .1, 1.)
-    h['act'] = trial.suggest_categorical('act', ['relu', 'elu', 'tanh'])
-    # no relu, since even though we constrain cosine positive, the adjustments may become negative
-    h['final'] = trial.suggest_categorical('final', ['sigmoid', 'linear'])
-    if h.final == 'linear':
-        h['loss'] = trial.suggest_categorical('loss', ['mse', 'mae'])
-    else:
-        h['loss'] = 'binary_crossentropy'
-    h['batch'] = int(trial.suggest_uniform('batch', 32, 512))
-    h['bn'] = trial.suggest_categorical('bn', [True, False])
+    h['act'] = 'relu' # trial.suggest_categorical('act', ['relu', 'elu', 'tanh'])
+    h['loss'] = 'mae' # trial.suggest_categorical('loss', ['mse', 'mae'])
+    h['batch'] = int(trial.suggest_uniform('batch', 32, 324))
+    h['bn'] = True # trial.suggest_categorical('bn', [True, False])
     h['normalize'] = trial.suggest_categorical('normalize', [True, False])
-    h['opt'] = trial.suggest_categorical('opt', ['sgd', 'nadam'])
-    h['lr'] = trial.suggest_uniform('lr', .0001, .001)
-    h['sample_weight'] = trial.suggest_uniform('sample_weight', 1., max_sample_weight)
-    h['std_mine'] = trial.suggest_uniform('std_mine', .1, 1.)
-    h['std_other'] = trial.suggest_uniform('std_other', .1, .6)  # is multiplied by std_min
+    h['opt'] = trial.suggest_categorical('opt', ['amsgrad', 'nadam'])
+    h['lr'] = .0004 # trial.suggest_uniform('lr', .0001, .001)
+    h['sw_mine'] = trial.suggest_uniform('sw_mine', 1., max_sample_weight)
+    h['sw_other'] = trial.suggest_uniform('sw_other', 1., h.sw_mine)
+    h['std_mine'] = trial.suggest_uniform('std_mine', .1, .5)
+    h['std_other'] = trial.suggest_uniform('std_other', .001, h.std_mine)
 
     print(h)
 
-    std_other = h.std_mine * h.std_other
-    adjust_mine = all_txt.apply(adjust('mine', h.std_mine))
+    adjust_mine = all_txt.apply(adjust('mine'))
     # start from other end so there's no overlap
-    adjust_other = all_txt[::-1].apply(adjust('other', std_other))[::-1]
-    adjust_ = (adjust_mine + adjust_other).values
-
+    adjust_other = all_txt[::-1].apply(adjust('other'))[::-1]
+    adjusts = [
+        dict(values=adjust_mine, amount=h.std_mine, weight=h.sw_mine),
+        dict(values=adjust_other, amount=h.std_other, weight=h.sw_other),
+    ]
 
     dnn.hypers = Box(h)
     dnn.rhs = rhs_norm if h.normalize else rhs
-    dnn.adjustments = adjust_
+    dnn.adjustments = adjusts
     dnn.init_model(load=False)
     dnn.fit()
     mse = np.clip(dnn.loss, 0., 1.)
@@ -129,12 +126,14 @@ if args_p.winner:
     objective(dnn.hypers)
     exit(0)
 
-STUDY = "study4"
+STUDY = "study7"
 DB = os.getenv("DB_URL", None)
 study = optuna.create_study(study_name=STUDY, storage=DB, load_if_exists=True)
 if not args_p.dump:
     study.optimize(objective, n_trials=max_evals)
 
+imp = optuna.importance.get_param_importances(study)
+print(imp)
 from sqlalchemy import create_engine
 engine = create_engine(DB)
 df = study.trials_dataframe(attrs=('value', 'params', 'user_attrs')).sort_values("value")
