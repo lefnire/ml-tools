@@ -127,3 +127,20 @@ def test_strip_html(content):
     print(res)
     assert type(res) == str
     assert "<" not in res
+
+
+@pytest.mark.parametrize("content", [
+    ("I moved to Portland in 2014", "move portland DATE"),
+    ("I moved to Portland 2014-01-01", "move portland DATE"),
+    ("$5m dollars", "MONEY"),
+    ("$5 million", "MONEY"),
+    ("$ 5.5 million", "MONEY"),
+    ("The third item", "ORDINAL item"),
+    ("The 2nd item", "ORDINAL item"),
+    ("1 megabyte file", "NUMBER file"),
+    ("1gb file", "CARDINAL file"),
+    ("1k people", "CARDINAL people"),
+    # ("Artificial intelligence is a study in computer science that is gaining huge traction", "")
+])
+def test_keywords_fast(content):
+    assert CleanText(content[0]).keywords(mode='fast').join().value() == content[1]

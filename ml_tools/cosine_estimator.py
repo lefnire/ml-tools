@@ -136,7 +136,7 @@ class CosineEstimator:
         history = self.model.fit(
             x, y,
             **extra,
-            epochs=50,
+            epochs=30,
             callbacks=[self.es],
             batch_size=h.batch,
             shuffle=True,

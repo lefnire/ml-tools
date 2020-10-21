@@ -7,6 +7,7 @@ from gensim.models.phrases import Phrases, Phraser
 from gensim.parsing import preprocessing as pp
 from .utils import THREADS
 from textacy.preprocessing import replace as treplace
+from urllib.parse import urlparse
 from typing import List
 import logging
 
@@ -21,10 +22,9 @@ if SPACY_GPU:
     spacy.prefer_gpu()
 
 import lemminflect  # just import. Ties itself into spacy internals
-nlp_fast = spacy.load('en', disable=['parser', 'ner'])
+# nlp_fast = spacy.load('en', disable=['parser', 'ner'])
+nlp_fast = spacy.load('en')
 
-# Much slower, but maybe more robust (see t.ent_type_ below)
-NER = False
 nlp_accurate = None
 def init_nlp_accurate():
     global nlp_accurate
@@ -33,8 +33,7 @@ def init_nlp_accurate():
     # a1eed8c3: lemminflect
     import stanza
     from spacy_stanza import StanzaLanguage
-    proc = 'tokenize,pos,lemma'
-    if NER: proc += ',ner'
+    proc = 'tokenize,pos,lemma,ner'
     if not os.path.exists(DEFAULT_MODEL_DIR):
         stanza.download('en')
     snlp = stanza.Pipeline(lang="en", processors=proc, use_gpu=SPACY_GPU)
@@ -166,7 +165,7 @@ class CleanText:
 
         # misc
         # ordinals? shouldn't these be handled by spacy?
-        s = resub(r"\b([0-9]+)(st|rd|th|nd)\b", r"\1", s)
+        # s = resub(r"\b([0-9]+)(st|rd|th|nd)\b", r"\1", s)  # handled in keywords()
         s = resub(r"\b([0-9]{4})[\-/]([0-9]{4})\b", r"\1, \2", s)  # break up dates
         s = s.replace("~", "")  # re.sub(r"\b\~$", "$", s, flags=re.IGNORECASE)
 
@@ -174,8 +173,9 @@ class CleanText:
         s = resub(r"(kilo|mega|giga)?(bytes?|hertz|hz)", " bytes ", s)
         s = resub(r"(\d|\b)(kb|mb|gb|kib|mib|gig|ghz|mhz)s?\b", r"\1 bytes ", s)
 
-        s = resub(r"(trillion|billion|million|thousand|hundred)s?", " amount ", s)
-        s = resub(r"(\d|\b)(k|m|b)\b", r"\1 amount ", s)
+        # handled in keywords()
+        # s = resub(r"(trillion|billion|million|thousand|hundred)s?", " amount ", s)
+        # s = resub(r"(\d|\b)(k|m|b)\b", r"\1 amount ", s)
 
         # Remove over-added spaces during ^
         s = mult_whitespace(s)
@@ -206,94 +206,22 @@ class CleanText:
                 else:
                     paras[-1] += " " + text
                 last_tag = tag
-
         return paras
 
+
     # You'll never really call this on a single doc, so one_or_many is pointless; just error-preventing
-    @staticmethod
-    def _keywords_fast(pbar, docs, postags):
-        clean = []
-        for doc in nlp_fast.pipe(docs):
-            assert doc, "keywords() got empty document. This should be handled in @wrapper"
-            pbar.update(1)
-            tokens = []
-            for t in doc:
-                if t.is_stop or t.is_punct: continue
-                elif t.like_num: t = 'number'
-                elif t.is_currency: t = 'currency'
-                elif t.pos_ == 'SYM': t = 'symbol'
-                elif t.pos_ not in postags: continue
-                else:
-                    t = t.lemma_.lower()
-                    t = pp.strip_non_alphanum(t)
-                    # token = only_ascii(t)
-                    if len(t) < 2: continue
-                tokens.append(t)
-            clean.append(tokens)
-        return clean
-
-
-    @staticmethod
-    def _keywords_accurate(pbar, docs, postags):
-        if nlp_accurate is None: init_nlp_accurate()
-
-        clean = []
-        # batch_size doesn't seem to matter; n_process doesn't work with GPU, locks in CPU. n_threads deprecated
-        # Joblib approach https://spacy.io/usage/examples#multi-processing causes issues for threads|processes
-        # I give up, non-parallel it is!
-        for doc in nlp_accurate.pipe(docs):
-            assert doc, "keywords() got empty document. This should be handled in @wrapper"
-            if pbar: pbar.update(1)
-            tokens = []
-            for t in doc:
-                # https://spacy.io/api/token
-                if t.is_stop or t.is_punct:
-                    continue
-
-                # ner https://spacy.io/api/annotation#named-entities
-                # slow, but catches sequences of hard-to-catch numeric stuff. Only save
-                # one in the sequence ($10m -> MONEY MONEY MONEY)
-                elif NER and tokens and tokens[-1] != t.ent_type_ and \
-                    t.ent_type_ in 'DATE TIME PERCENT ORDINAL MONEY QUANTITY'.split():
-                    t = t.ent_type_
-
-                # Might want simple urls (apple.com), sticking to url/email regex in strip_html
-                # elif t.like_url: tokens.append('url')
-                # elif t.like_email: t = 'email'
-
-                # These ever used, after ent_type_ above?
-                elif t.like_num:
-                    t = 'number'
-                elif t.is_currency:
-                    t = 'currency'
-                elif t.pos_ == 'SYM':
-                    t = 'symbol'
-                # save for last, since using NER/POS conditions above
-                elif t.pos_ not in postags:
-                    continue
-                else:
-                    t = t.lemma_
-                    # Sometimes want certin symbols, reconsider
-                    t = re.sub("[,!?\%'/]", "", t.lower())  # pp.strip_non_alphanum(t)
-                    if len(t) < 2: continue
-                    # just a number after removing punct
-                    if treplace.replace_numbers(t) == '_NUM_': t = "number"
-                tokens.append(t)
-            clean.append(tokens)
-        return clean
-
     @one_or_many(batch=True, keep='lemmas')
     def keywords(
         self,
         docs,
-        postags=['NOUN', 'ADJ', 'VERB'],
+        postags=['NOUN', 'ADJ', 'VERB', 'PROPN'],
         mode='fast',
         silent=False,
         bigrams=True,
 
         # TODO automate these somehow, based on corpus size or something? I don't understand them
-        bigram_min_count=1,
-        bigram_threshold=2
+        bigram_min_count=5,
+        bigram_threshold=10.
     ):
         """
         Extracs keywords from documents using spacy lemmatization.
@@ -304,15 +232,56 @@ class CleanText:
         :param silent: whether to print progress (it can take a while, so progress bar)
         :param bigrams: whether to include bigrams
         """
+        # could ensure they call this before keywords, because spacy is brittle without it, but this is easier.
+        docs = [mult_whitespace(d) for d in docs]
+
+        if mode == 'fast':
+            nlp = nlp_fast
+            mode_ = "Spacy + Lemminflect"
+        else:
+            if nlp_accurate is None:
+                init_nlp_accurate()
+            nlp = nlp_accurate
+            mode_ = "spacy-stanza (Stanford NLP)"
+
         pbar = None
         if not silent:
             pbar = tqdm(total=len(docs))
-            mode_ = {"fast": "Spacy + Lemminflect", "accurate": "spacy-stanza (Stanford NLP)"}[mode]
             logger.info(f"Lemmatizing keywords with {mode_}")
-        fn = self._keywords_fast if mode == 'fast' else self._keywords_accurate
-        # could ensure they call this before keywords, because spacy is brittle without it, but this is easier.
-        docs = [mult_whitespace(d) for d in docs]
-        docs = fn(pbar, docs, postags)
+
+        clean = []
+        # batch_size doesn't seem to matter; n_process doesn't work with GPU, locks in CPU. n_threads deprecated
+        # Joblib approach https://spacy.io/usage/examples#multi-processing causes issues for threads|processes
+        # I give up, non-parallel it is!
+        for doc in nlp.pipe(docs):
+            assert doc, "keywords() got empty document. This should be handled in @wrapper"
+            pbar.update(1)
+            tokens = []
+            for t in doc:
+                # https://spacy.io/api/token
+                # print(t.pos_, t.ent_type_, t.is_stop, t.is_punct)
+
+                # ner https://spacy.io/api/annotation#named-entities
+                # slow, but catches sequences of hard-to-catch numeric stuff
+                if t.ent_type_ in 'DATE TIME PERCENT ORDINAL MONEY QUANTITY CARDINAL'.split():
+                    # already accounted for, $5m becomes MONEY MONEY MONEY
+                    if tokens and tokens[-1] == t.ent_type_:
+                        continue
+                    t = t.ent_type_
+                elif t.is_stop or t.is_punct:
+                    continue
+                elif t.like_url:
+                    # Might want simple urls (apple.com), sticking to url/email regex in strip_html
+                    t = urlparse(t.text).netloc
+                elif t.pos_ not in postags:
+                    continue
+                else:
+                    t = t._.lemma() if mode == 'fast' else t.lemma_
+                    t = t.lower()
+                    if len(t) < 2: continue
+                tokens.append(t)
+            clean.append(tokens)
+        docs = clean
         if pbar: pbar.close()
 
         set_ = lambda docs_: set(t for d in docs_ for t in d)

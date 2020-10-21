@@ -24,20 +24,20 @@ dnn = CosineEstimator(lhs, rhs)
 votes = Box(
     mine_up= r"(tensorflow|keras)",
     other_up=r"(cookbook|recipe)",
-    other_down=r"(artificial|\bai\b|python|java|cbt|cognitive behavior)"
+    other_down=r"(artificial|\bai\b|python|java|cbt|cognitive.?behav)"
 )
 votes['mine_down'] = votes.other_up
 searches = Box(
-    entries=r"(virtual|\bvr\b|cognitive|therap|cbt|dbt|dialectical)",
-    mine_up= r"(python|tensorflow|machine learn|keras|pytorch|scikit|pandas|artificial|\bai\b)",
-    other_up=r"(cook|recipe|comfort food|meal)",
+    entries=r"(virtual.?reality|\bvr\b|oculus|cognitive.?behav|therap|cbt|dbt|dialectical|depression|anxiety)",
+    mine_up= r"(python|tensorflow|machine.?learn|keras|pytorch|scikit|pandas|artificial|\bai\b|data.?science|deep.?learn)",
+    other_up=r"(cook|recipe|comfort.?food|meal)",
 )
 searches.update(
     mine_down=searches.other_up,
     other_down=votes.other_down
 )
 
-vote_ct = 100
+vote_ct = 200
 def adjust(k, std):
     ct = 0
     def adjust_(text):
@@ -72,18 +72,21 @@ def objective(trial):
     h['layers'] = trial.suggest_int('layers', 1, 2)
     for i in range(h.layers):
         h[f"l{i}"] = trial.suggest_uniform(f"l{i}", .1, 1.)
-    h['act'] = 'elu'  # hp.choice('act', ['relu', 'elu', 'tanh'])
+    h['act'] = trial.suggest_categorical('act', ['relu', 'elu', 'tanh'])
     # no relu, since even though we constrain cosine positive, the adjustments may become negative
-    h['final'] = 'linear' # trial.suggest_categorical('final', ['sigmoid', 'linear'])
-    h['loss'] = trial.suggest_categorical('loss', ['mse', 'mae'])
-    h['batch'] = 224 # int(trial.suggest_uniform('batch', 32, 512))
-    h['bn'] = True # trial.suggest_categorical('bn', [True, False])
-    h['normalize'] = True  # trial.suggest_categorical('normalize', [True, False])
-    h['opt'] = 'nadam' # trial.suggest_categorical('opt', ['sgd', 'nadam'])
-    h['lr'] = .0004 # trial.suggest_uniform('lr', .0001, .001)
-    h['sample_weight'] = 2. # trial.suggest_uniform('sample_weight', 1., max_sample_weight)
-    h['std_mine'] = .187  # trial.suggest_uniform('std_mine', .1, 1.)
-    h['std_other'] = .307  # trial.suggest_uniform('std_other', .1, .6)  # is multiplied by std_min
+    h['final'] = trial.suggest_categorical('final', ['sigmoid', 'linear'])
+    if h.final == 'linear':
+        h['loss'] = trial.suggest_categorical('loss', ['mse', 'mae'])
+    else:
+        h['loss'] = 'binary_crossentropy'
+    h['batch'] = int(trial.suggest_uniform('batch', 32, 512))
+    h['bn'] = trial.suggest_categorical('bn', [True, False])
+    h['normalize'] = trial.suggest_categorical('normalize', [True, False])
+    h['opt'] = trial.suggest_categorical('opt', ['sgd', 'nadam'])
+    h['lr'] = trial.suggest_uniform('lr', .0001, .001)
+    h['sample_weight'] = trial.suggest_uniform('sample_weight', 1., max_sample_weight)
+    h['std_mine'] = trial.suggest_uniform('std_mine', .1, 1.)
+    h['std_other'] = trial.suggest_uniform('std_other', .1, .6)  # is multiplied by std_min
 
     print(h)
 
@@ -111,12 +114,12 @@ def objective(trial):
     cts['orig'] = texts.apply(ct_match('entries')).sum()
     for k in ['mine_up', 'mine_down', 'other_up', 'other_down']:
         cts[k] = texts.apply(ct_match(k)).sum()
-    score = cts.orig + cts.mine_up * 1.1 - cts.mine_down\
+    score = cts.orig + cts.mine_up * 1.15 - cts.mine_down\
         + cts.other_up*.1 - cts.other_down*.1
     trial.set_user_attr('mse', float(mse))
     for k, v in cts.items():
         trial.set_user_attr(k, float(v))
-    score = score - 10*np.log10(mse)
+    #score = score - 10*np.log10(mse)
 
     return -score
 
@@ -126,7 +129,7 @@ if args_p.winner:
     objective(dnn.hypers)
     exit(0)
 
-STUDY = "study9"
+STUDY = "study4"
 DB = os.getenv("DB_URL", None)
 study = optuna.create_study(study_name=STUDY, storage=DB, load_if_exists=True)
 if not args_p.dump:
