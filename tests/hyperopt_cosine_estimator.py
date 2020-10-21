@@ -8,8 +8,8 @@ import optuna
 
 import argparse
 parser = argparse.ArgumentParser()
-parser.add_argument('--winner', action='store_true', help='Just try winning hypers (1 run)')
-parser.add_argument('--dump', action='store_true', help='Dump results to DB')
+parser.add_argument('--jobs', help='Number of threads', default=1)
+parser.add_argument('--init', action='store_true', help='initialize starter trials')
 args_p = parser.parse_args()
 
 lhs = articles()
@@ -17,9 +17,6 @@ lhs = Similars(lhs).embed().cluster(algo='agglomorative').value()
 
 rhs = np.load('/storage/libgen/testing.npy') #, mmap_mode='r')
 books = pd.read_feather('/storage/libgen/testing.df')
-rhs_norm = Similars(rhs).normalize().value()
-
-dnn = CosineEstimator(lhs, rhs)
 
 votes = Box(
     mine_up= r"(tensorflow|keras)",
@@ -74,17 +71,17 @@ def objective(trial):
         h[f"l{i}"] = trial.suggest_uniform(f"l{i}", .1, 1.)
     h['act'] = 'relu' # trial.suggest_categorical('act', ['relu', 'elu', 'tanh'])
     h['loss'] = 'mae' # trial.suggest_categorical('loss', ['mse', 'mae'])
-    h['batch'] = int(trial.suggest_uniform('batch', 32, 324))
+    h['batch'] = int(trial.suggest_uniform('batch', 32, 325))
     h['bn'] = True # trial.suggest_categorical('bn', [True, False])
     h['normalize'] = trial.suggest_categorical('normalize', [True, False])
     h['opt'] = trial.suggest_categorical('opt', ['amsgrad', 'nadam'])
     h['lr'] = .0004 # trial.suggest_uniform('lr', .0001, .001)
-    h['sw_mine'] = trial.suggest_uniform('sw_mine', 1., max_sample_weight)
-    h['sw_other'] = trial.suggest_uniform('sw_other', 1., h.sw_mine)
+    h['sw_mine'] = trial.suggest_uniform('sw_mine', 2., max_sample_weight)
+    sw_other = trial.suggest_uniform('sw_other', .01, 1.)
+    h['sw_other'] = max(1.5, sw_other * h.sw_mine)
     h['std_mine'] = trial.suggest_uniform('std_mine', .1, .5)
-    h['std_other'] = trial.suggest_uniform('std_other', .001, h.std_mine)
-
-    print(h)
+    std_other = trial.suggest_uniform('std_other', .1, 1.)
+    h['std_other'] = max(.01, std_other * h.std_mine)
 
     adjust_mine = all_txt.apply(adjust('mine'))
     # start from other end so there's no overlap
@@ -94,10 +91,7 @@ def objective(trial):
         dict(values=adjust_other, amount=h.std_other, weight=h.sw_other),
     ]
 
-    dnn.hypers = Box(h)
-    dnn.rhs = rhs_norm if h.normalize else rhs
-    dnn.adjustments = adjusts
-    dnn.init_model(load=False)
+    dnn = CosineEstimator(lhs, rhs, adjustments=adjusts, hypers=h)
     dnn.fit()
     mse = np.clip(dnn.loss, 0., 1.)
 
@@ -120,23 +114,38 @@ def objective(trial):
 
     return -score
 
-if args_p.winner:
-    # https://blog.devart.com/pivot-tables-in-postgresql.html
-    raise Exception("Won't work after Optuna conversion, fix this.")
-    objective(dnn.hypers)
-    exit(0)
 
-STUDY = "study7"
+try_first = CosineEstimator.default_hypers
+try_first = [
+    try_first,
+    {**try_first, **dict(batch=300.)},
+    {**try_first, **dict(opt='amsgrad')},
+    {**try_first, **dict(sw_mine=10.)},
+    {**try_first, **dict(normalize=False)},
+]
+
+STUDY = "study2"
 DB = os.getenv("DB_URL", None)
-study = optuna.create_study(study_name=STUDY, storage=DB, load_if_exists=True)
-if not args_p.dump:
-    study.optimize(objective, n_trials=max_evals)
-
-imp = optuna.importance.get_param_importances(study)
-print(imp)
 from sqlalchemy import create_engine
 engine = create_engine(DB)
-df = study.trials_dataframe(attrs=('value', 'params', 'user_attrs')).sort_values("value")
-for c in df.columns:
-    df.rename(columns={c: re.sub(r"(user_attrs_|params_)", "", c)}, inplace=True)
-df.to_sql(f"results_{STUDY}", engine, if_exists="replace")
+
+def save_results(study, frozen_trial):
+    try:
+        # fails if only 1 trial
+        imp = optuna.importance.get_param_importances(study)
+        print(imp)
+    except: pass
+    df = study.trials_dataframe(attrs=('value', 'params', 'user_attrs')).sort_values("value")
+    for c in df.columns:
+        df.rename(columns={c: re.sub(r"(user_attrs_|params_)", "", c)}, inplace=True)
+    try:
+        # fails if race-condition on drop-table
+        df.to_sql(f"results_{STUDY}", engine, if_exists="replace")
+    except: pass
+
+
+study = optuna.create_study(study_name=STUDY, storage=DB, load_if_exists=True)
+if args_p.init:
+    for tf in try_first:
+        study.enqueue_trial(tf)
+study.optimize(objective, n_trials=max_evals, n_jobs=int(args_p.jobs), callbacks=[save_results])

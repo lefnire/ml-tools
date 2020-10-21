@@ -23,6 +23,21 @@ def permute(arr: np.ndarray):
     return np.random.permutation(arr.shape[0])
 
 class CosineEstimator:
+    default_hypers = dict(
+        layers=1,  # winner=1
+        l0=.65,  # winner=.65
+        act='relu',  # winner=relu
+        loss='mae',  # winner=mae
+        batch=128,  # winner=324
+        bn=True,  # inconclusive
+        opt='nadam',  # winner=nadam (TODO try AdamW)
+        lr=.0004,  # winner=.0004
+        normalize=True,  # inconclusive
+        sw_mine=50.,
+        sw_other=.04, # multiplied by ^
+        std_mine=.3,
+        std_other=.15  # multiplied by ^
+    )
     """
     Neural network that learns the cosine DISTANCE function (between 0-1, 0 being similar, 1 being distant). Also
     allows fine-tuning adjustments of those similarities, eg in the case of user-ratings on documents (embedded).
@@ -32,7 +47,8 @@ class CosineEstimator:
         lhs: np.ndarray,
         rhs: np.ndarray,
         adjustments: List = [],
-        filename: str = None
+        filename: str = None,
+        hypers: dict = {}
     ):
         """
 
@@ -46,17 +62,8 @@ class CosineEstimator:
                 zero except for the rows you want adjusted, which should probably be 1. `arr=np.zeros(); arr[mask] = 1.`
         :param filename: if you want to save/load the trained model, specify a filename
         """
-        self.hypers = Box(
-            layers=1, # winner=1
-            l0=.65,  # winner=.65
-            act='relu',  # winner=relu
-            loss='mae',  # winner=mae
-            batch=324,  # winner=324
-            bn=True,  # inconclusive
-            opt='nadam',  # winner=nadam (TODO try AdamW)
-            lr=.0004,  # winner=.0004
-            normalize=False  # inconclusive
-        )
+        self.hypers = Box({**CosineEstimator.default_hypers, **hypers})
+        print(self.hypers)
 
         if self.hypers.normalize:
             lhs, rhs = Similars(lhs, rhs).normalize().value()
