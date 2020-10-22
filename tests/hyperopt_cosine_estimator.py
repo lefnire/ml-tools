@@ -18,19 +18,21 @@ lhs = Similars(lhs).embed().cluster(algo='agglomorative').value()
 rhs = np.load('/storage/libgen/testing.npy') #, mmap_mode='r')
 books = pd.read_feather('/storage/libgen/testing.df')
 
+food_re = "cook|recipe|food|meal"
+# these should be really specific (think about edge-cases)
 votes = Box(
-    mine_up= r"(tensorflow|keras)",
-    other_up=r"(cookbook|recipe)",
+    mine_up=r"(tensorflow|keras)",
+    other_up=rf"({food_re}|econom|republican)",
+    mine_down=rf"({food_re})",
     other_down=r"(artificial|\bai\b|python|java|cbt|cognitive.?behav)"
 )
-votes['mine_down'] = votes.other_up
+
+# these should be pretty general, catch-all
 searches = Box(
-    entries=r"(virtual.?reality|\bvr\b|oculus|cognitive.?behav|therap|cbt|dbt|dialectical|depression|anxiety)",
-    mine_up= r"(python|tensorflow|machine.?learn|keras|pytorch|scikit|pandas|artificial|\bai\b|data.?science|deep.?learn)",
-    other_up=r"(cook|recipe|comfort.?food|meal)",
-)
-searches.update(
-    mine_down=searches.other_up,
+    entries=r"(virtual|\bvr\b|oculus|cognitive|therap|cbt|dbt|dialectical|depression|anxiety|mindful)",
+    mine_up= r"(python|tensorflow|machine.?learn|keras|pytorch|scikit|pandas|numpy|artificial|\bai\b|data|deep.?learn)",
+    other_up=rf"({food_re}|trump|president|politic|financ|econom|republican|democrat)",
+    mine_down=votes.mine_down,
     other_down=votes.other_down
 )
 
@@ -46,8 +48,6 @@ def adjust(k):
         if v: ct += 1
         return v
     return adjust_
-all_txt = (books.title + books.text)
-
 
 def ct_match(k):
     def ct_match_(txt):
@@ -63,12 +63,12 @@ def ct_match(k):
 max_sample_weight = 100.
 
 
-max_evals = 1000
+max_evals = 400
 def objective(trial):
     h = Box({})
-    h['layers'] = trial.suggest_int('layers', 1, 2)
+    h['layers'] = 1 # trial.suggest_int('layers', 1, 2)
     for i in range(h.layers):
-        h[f"l{i}"] = trial.suggest_uniform(f"l{i}", .1, 1.)
+        h[f"l{i}"] = trial.suggest_uniform(f"l{i}", .2, .6)
     h['act'] = 'relu' # trial.suggest_categorical('act', ['relu', 'elu', 'tanh'])
     h['loss'] = 'mae' # trial.suggest_categorical('loss', ['mse', 'mae'])
     h['batch'] = int(trial.suggest_uniform('batch', 32, 325))
@@ -79,17 +79,16 @@ def objective(trial):
     h['sw_mine'] = trial.suggest_uniform('sw_mine', 2., max_sample_weight)
     sw_other = trial.suggest_uniform('sw_other', .01, 1.)
     h['sw_other'] = max(1.5, sw_other * h.sw_mine)
-    h['std_mine'] = trial.suggest_uniform('std_mine', .1, .5)
-    std_other = trial.suggest_uniform('std_other', .1, 1.)
+    h['std_mine'] = .3 # trial.suggest_uniform('std_mine', .1, .5)
+    std_other = .15 # trial.suggest_uniform('std_other', .1, 1.)
     h['std_other'] = max(.01, std_other * h.std_mine)
 
-    adjust_mine = all_txt.apply(adjust('mine'))
-    # start from other end so there's no overlap
-    adjust_other = all_txt[::-1].apply(adjust('other'))[::-1]
-    adjusts = [
-        dict(values=adjust_mine, amount=h.std_mine, weight=h.sw_mine),
-        dict(values=adjust_other, amount=h.std_other, weight=h.sw_other),
-    ]
+    df = pd.DataFrame({'title': books.title})
+    adjusts = []
+    for k in ['mine', 'other']:
+        shuff = df.sample(frac=1).index
+        df.loc[shuff, k] = df.loc[shuff, 'title'].apply(adjust(k))
+        adjusts.append(dict(values=df[k].values, amount=h[f'std_{k}'], weight=h[f'sw_{k}']))
 
     dnn = CosineEstimator(lhs, rhs, adjustments=adjusts, hypers=h)
     dnn.fit()
@@ -98,33 +97,24 @@ def objective(trial):
     # see how many subjectively-good books it recommended
     books['dist'] = dnn.predict()
     df = books.sort_values('dist').iloc[:300]
-    texts = df.title + df.text
-    print(df.title.iloc[:50])
+    titles = df.title
+    print(titles.iloc[:50])
 
     cts = Box({})
-    cts['orig'] = texts.apply(ct_match('entries')).sum()
+    cts['orig'] = titles.apply(ct_match('entries')).sum()
     for k in ['mine_up', 'mine_down', 'other_up', 'other_down']:
-        cts[k] = texts.apply(ct_match(k)).sum()
-    score = cts.orig + cts.mine_up * 1.15 - cts.mine_down\
+        cts[k] = titles.apply(ct_match(k)).sum()
+    score = cts.orig + cts.mine_up * 1.5 - cts.mine_down\
         + cts.other_up*.1 - cts.other_down*.1
     trial.set_user_attr('mse', float(mse))
     for k, v in cts.items():
         trial.set_user_attr(k, float(v))
-    #score = score - 10*np.log10(mse)
+    score = score - 10*np.log10(mse)
 
     return -score
 
 
-try_first = CosineEstimator.default_hypers
-try_first = [
-    try_first,
-    {**try_first, **dict(batch=300.)},
-    {**try_first, **dict(opt='amsgrad')},
-    {**try_first, **dict(sw_mine=10.)},
-    {**try_first, **dict(normalize=False)},
-]
-
-STUDY = "study2"
+STUDY = "study3"
 DB = os.getenv("DB_URL", None)
 from sqlalchemy import create_engine
 engine = create_engine(DB)
@@ -146,6 +136,8 @@ def save_results(study, frozen_trial):
 
 study = optuna.create_study(study_name=STUDY, storage=DB, load_if_exists=True)
 if args_p.init:
-    for tf in try_first:
-        study.enqueue_trial(tf)
+    study.enqueue_trial(dict(l0=.5, batch=250, opt='nadam', normalize=True, sw_mine=50., sw_other=.04))
+    study.enqueue_trial(dict(l0=.25, batch=250, opt='nadam', normalize=True, sw_mine=50., sw_other=.04))
+    study.enqueue_trial(dict(l0=.5, batch=250, opt='nadam', normalize=False, sw_mine=50., sw_other=.04))
+    study.enqueue_trial(dict(l0=.5, batch=250, opt='amsgrad', normalize=True, sw_mine=50., sw_other=.04))
 study.optimize(objective, n_trials=max_evals, n_jobs=int(args_p.jobs), callbacks=[save_results])

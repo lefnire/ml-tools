@@ -25,10 +25,10 @@ def permute(arr: np.ndarray):
 class CosineEstimator:
     default_hypers = dict(
         layers=1,  # winner=1
-        l0=.65,  # winner=.65
+        l0=.6,  # winner=.65
         act='relu',  # winner=relu
         loss='mae',  # winner=mae
-        batch=128,  # winner=324
+        batch=324,  # winner=324
         bn=True,  # inconclusive
         opt='nadam',  # winner=nadam (TODO try AdamW)
         lr=.0004,  # winner=.0004
