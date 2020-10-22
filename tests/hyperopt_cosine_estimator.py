@@ -116,10 +116,12 @@ def objective(trial):
 
 STUDY = "study3"
 DB = os.getenv("DB_URL", None)
-from sqlalchemy import create_engine
-engine = create_engine(DB)
+if DB:
+    from sqlalchemy import create_engine
+    engine = create_engine(DB)
 
 def save_results(study, frozen_trial):
+    if not DB: return
     try:
         # fails if only 1 trial
         imp = optuna.importance.get_param_importances(study)
@@ -134,7 +136,8 @@ def save_results(study, frozen_trial):
     except: pass
 
 
-study = optuna.create_study(study_name=STUDY, storage=DB, load_if_exists=True)
+study_args = dict(storage=DB, load_if_exists=True) if DB else {}
+study = optuna.create_study(study_name=STUDY, **study_args)
 if args_p.init:
     study.enqueue_trial(dict(l0=.5, batch=250, opt='nadam', normalize=True, sw_mine=50., sw_other=.04))
     study.enqueue_trial(dict(l0=.25, batch=250, opt='nadam', normalize=True, sw_mine=50., sw_other=.04))

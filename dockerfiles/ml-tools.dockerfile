@@ -1,4 +1,4 @@
-FROM lefnire/ml-tools:transformers-pt-tf-0.0.5
+FROM lefnire/ml-tools:transformers-0.0.18
 
 RUN \
   pip install --no-cache-dir \
