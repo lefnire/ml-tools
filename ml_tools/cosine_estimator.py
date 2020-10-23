@@ -28,7 +28,7 @@ class CosineEstimator:
         l0=.6,  # winner=.65
         act='relu',  # winner=relu
         loss='mae',  # winner=mae
-        batch=324,  # winner=324
+        batch=300,  # winner=324
         bn=True,  # inconclusive
         opt='nadam',  # winner=nadam (TODO try AdamW)
         lr=.0004,  # winner=.0004

@@ -18,20 +18,21 @@ lhs = Similars(lhs).embed().cluster(algo='agglomorative').value()
 rhs = np.load('/storage/libgen/testing.npy') #, mmap_mode='r')
 books = pd.read_feather('/storage/libgen/testing.df')
 
-food_re = "cook|recipe|food|meal"
+# don't use cook(.?book)? , it's used in too many programming books
+food_re = "gluten.?free|vegan|vegetarian"
 # these should be really specific (think about edge-cases)
 votes = Box(
     mine_up=r"(tensorflow|keras)",
-    other_up=rf"({food_re}|econom|republican)",
+    other_up=rf"({food_re}|republican)",
     mine_down=rf"({food_re})",
-    other_down=r"(artificial|\bai\b|python|java|cbt|cognitive.?behav)"
+    other_down=r"(artificial|\bai\b|python|java|css|html|cbt|cognitive.?behav)"
 )
 
 # these should be pretty general, catch-all
 searches = Box(
     entries=r"(virtual|\bvr\b|oculus|cognitive|therap|cbt|dbt|dialectical|depression|anxiety|mindful)",
-    mine_up= r"(python|tensorflow|machine.?learn|keras|pytorch|scikit|pandas|numpy|artificial|\bai\b|data|deep.?learn)",
-    other_up=rf"({food_re}|trump|president|politic|financ|econom|republican|democrat)",
+    mine_up= r"(python|tensorflow|machine.?learn|keras|pytorch|scikit|pandas|numpy|artificial|\bai\b|data|deep.?learn|analytics)",
+    other_up=rf"({food_re}|smoothie|paleo|chef|nutrition|trump|president|politic|republican|democrat)",
     mine_down=votes.mine_down,
     other_down=votes.other_down
 )
@@ -54,6 +55,12 @@ def ct_match(k):
         return 1 if re.search(searches[k], txt, re.IGNORECASE) else 0
     return ct_match_
 
+STUDY = "study8"
+DB = os.getenv("DB_URL", None)
+if DB:
+    from sqlalchemy import create_engine
+    engine = create_engine(DB)
+
 # from sklearn.utils import class_weight
 # will_adjust = np.zeros(rhs.shape[0])
 # will_adjust[:vote_ct*2] = np.ones(vote_ct*2)
@@ -66,11 +73,11 @@ max_sample_weight = 100.
 max_evals = 400
 def objective(trial):
     h = Box({})
-    h['layers'] = 1 # trial.suggest_int('layers', 1, 2)
+    h['layers'] = trial.suggest_int('layers', 1, 2)
     for i in range(h.layers):
-        h[f"l{i}"] = trial.suggest_uniform(f"l{i}", .2, .6)
-    h['act'] = 'relu' # trial.suggest_categorical('act', ['relu', 'elu', 'tanh'])
-    h['loss'] = 'mae' # trial.suggest_categorical('loss', ['mse', 'mae'])
+        h[f"l{i}"] = trial.suggest_uniform(f"l{i}", .1, 1.)
+    h['act'] = trial.suggest_categorical('act', ['relu', 'elu', 'tanh'])
+    h['loss'] = trial.suggest_categorical('loss', ['mse', 'mae'])
     h['batch'] = int(trial.suggest_uniform('batch', 32, 325))
     h['bn'] = True # trial.suggest_categorical('bn', [True, False])
     h['normalize'] = trial.suggest_categorical('normalize', [True, False])
@@ -89,6 +96,10 @@ def objective(trial):
         shuff = df.sample(frac=1).index
         df.loc[shuff, k] = df.loc[shuff, 'title'].apply(adjust(k))
         adjusts.append(dict(values=df[k].values, amount=h[f'std_{k}'], weight=h[f'sw_{k}']))
+    if DB:
+        try:
+            df[(df.mine!=0)|(df.other!=0)].to_sql(f"adjusts", engine, if_exists='replace')
+        except: pass
 
     dnn = CosineEstimator(lhs, rhs, adjustments=adjusts, hypers=h)
     dnn.fit()
@@ -114,12 +125,6 @@ def objective(trial):
     return -score
 
 
-STUDY = "study3"
-DB = os.getenv("DB_URL", None)
-if DB:
-    from sqlalchemy import create_engine
-    engine = create_engine(DB)
-
 def save_results(study, frozen_trial):
     if not DB: return
     try:
@@ -139,8 +144,10 @@ def save_results(study, frozen_trial):
 study_args = dict(storage=DB, load_if_exists=True) if DB else {}
 study = optuna.create_study(study_name=STUDY, **study_args)
 if args_p.init:
-    study.enqueue_trial(dict(l0=.5, batch=250, opt='nadam', normalize=True, sw_mine=50., sw_other=.04))
-    study.enqueue_trial(dict(l0=.25, batch=250, opt='nadam', normalize=True, sw_mine=50., sw_other=.04))
-    study.enqueue_trial(dict(l0=.5, batch=250, opt='nadam', normalize=False, sw_mine=50., sw_other=.04))
-    study.enqueue_trial(dict(l0=.5, batch=250, opt='amsgrad', normalize=True, sw_mine=50., sw_other=.04))
+    dh = CosineEstimator.default_hypers
+    study.enqueue_trial(dh)
+    study.enqueue_trial({**dh, **dict(normalize=False)})
+    study.enqueue_trial({**dh, **dict(l0=.3)})
+    study.enqueue_trial({**dh, **dict(batch=128)})
+    study.enqueue_trial({**dh, **dict(opt='amsgrad')})
 study.optimize(objective, n_trials=max_evals, n_jobs=int(args_p.jobs), callbacks=[save_results])
