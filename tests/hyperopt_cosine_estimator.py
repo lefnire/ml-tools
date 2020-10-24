@@ -55,7 +55,7 @@ def ct_match(k):
         return 1 if re.search(searches[k], txt, re.IGNORECASE) else 0
     return ct_match_
 
-STUDY = "study10"
+STUDY = "study14"
 DB = os.getenv("DB_URL", None)
 if DB:
     from sqlalchemy import create_engine
@@ -72,7 +72,7 @@ print('max_sample_weight', max_sample_weight)
 max_evals = 400
 def objective(trial):
     h = Box({})
-    h['layers'] = trial.suggest_int('layers', 1, 2)
+    h['layers'] = 1 # trial.suggest_int('layers', 1, 2)
     for i in range(h.layers):
         h[f"l{i}"] = .65 # trial.suggest_uniform(f"l{i}", .1, 1.)
     h['act'] = 'relu' # trial.suggest_categorical('act', ['relu', 'elu', 'tanh'])
@@ -88,6 +88,7 @@ def objective(trial):
     h['std_mine'] = trial.suggest_uniform('std_mine', .1, .5)
     std_other = trial.suggest_uniform('std_other', .1, 1.)
     h['std_other'] = max(.01, std_other * h.std_mine)
+    h['shuffle'] = trial.suggest_categorical('shuffle', [True, False, 'batch'])
 
     df = pd.DataFrame({'title': books.title})
     adjusts = []
@@ -114,8 +115,8 @@ def objective(trial):
     cts['orig'] = titles.apply(ct_match('entries')).sum()
     for k in ['mine_up', 'mine_down', 'other_up', 'other_down']:
         cts[k] = titles.apply(ct_match(k)).sum()
-    score = cts.orig + cts.mine_up * 1.3 - cts.mine_down\
-        + cts.other_up*.1 - cts.other_down*.1
+    score = cts.orig + cts.mine_up * 1.25 - cts.mine_down\
+        + cts.other_up*.125 - cts.other_down*.1
     trial.set_user_attr('mse', float(mse))
     for k, v in cts.items():
         trial.set_user_attr(k, float(v))
@@ -146,5 +147,6 @@ if args_p.init:
     dh = CosineEstimator.default_hypers
     study.enqueue_trial(dh)
     study.enqueue_trial({**dh, **dict(batch=500)})
-    study.enqueue_trial({**dh, **dict(sw_mine=200.)})
+    study.enqueue_trial({**dh, **dict(shuffle='batch')})
+    study.enqueue_trial({**dh, **dict(shuffle=False)})
 study.optimize(objective, n_trials=max_evals, n_jobs=int(args_p.jobs), callbacks=[save_results])

@@ -11,6 +11,7 @@ from tensorflow.keras.callbacks import EarlyStopping
 from tensorflow.keras.optimizers import SGD, Nadam, Adam
 
 import pdb, logging, math, re
+from sklearn.model_selection import StratifiedShuffleSplit, train_test_split
 from os.path import exists
 from box import Box
 from ml_tools import Similars
@@ -33,6 +34,7 @@ class CosineEstimator:
         opt='nadam',  # winner=nadam (TODO try AdamW)
         lr=.0004,  # winner=.0004
         normalize=True,  # win=True
+        shuffle=True,
 
         # The above are solid winners. Below are still work in progress / hard to optmize.
         # sw_mine, sw_other winners
@@ -140,26 +142,44 @@ class CosineEstimator:
             return
         else:
             logger.info("DNN: learn cosine function")
+
         h = self.hypers
+        x, y = self.rhs, self.y
 
-        shuff = permute(self.y)  # TODO stratify on adjustments (since rare)
-        x, y = self.rhs[shuff], self.y[shuff]
-
-        sample_weight = np.ones(y.shape[0])
+        sw = np.ones(y.shape[0])
         for adj in self.adjustments:
-            vals = adj['values'][shuff]
+            vals = adj['values']
             y = y - vals * adj['amount']
             mask = vals != 0
-            sample_weight[mask] = np.maximum(sample_weight[mask], adj['weight'])
+            sw[mask] = np.maximum(sw[mask], adj['weight'])
+
+        # Stratify-split based on adjustments; that is, try to ensure some adjustments present for each
+        # training / validation batch.
+        # https://scikit-learn.org/stable/modules/generated/sklearn.model_selection.StratifiedShuffleSplit.html
+        labels = (sw != 1).astype(int)
+        if labels.any():
+            sss = StratifiedShuffleSplit(n_splits=1, test_size=0.3)
+            train_idx, val_idx = next(sss.split(x, labels))
+            x_train, y_train, sw_train = x[train_idx], y[train_idx], sw[train_idx]
+            x_val, y_val, sw_val = x[val_idx], y[val_idx], sw[val_idx]
+            fit_args = dict(
+                sample_weight=sw_train,
+                validation_data=(x_val, y_val, sw_val),
+                shuffle=h.shuffle
+            )
+        else:
+            x_train, x_val, y_train, y_val = train_test_split(x, y, test_size=.3, shuffle=True)
+            fit_args = dict(
+                validation_data=(x_val, y_val),
+                shuffle=True
+            )
 
         history = self.model.fit(
-            x, y,
-            sample_weight=sample_weight,
+            x_train, y_train,
             epochs=30,
             callbacks=[self.es],
             batch_size=h.batch,
-            shuffle=True,
-            validation_split=.3
+            **fit_args
         )
         self.loss = history.history['val_loss'][-1]
         if self.filename:
