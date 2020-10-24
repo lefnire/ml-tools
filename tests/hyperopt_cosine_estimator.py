@@ -55,19 +55,18 @@ def ct_match(k):
         return 1 if re.search(searches[k], txt, re.IGNORECASE) else 0
     return ct_match_
 
-STUDY = "study8"
+STUDY = "study10"
 DB = os.getenv("DB_URL", None)
 if DB:
     from sqlalchemy import create_engine
     engine = create_engine(DB)
 
-# from sklearn.utils import class_weight
-# will_adjust = np.zeros(rhs.shape[0])
-# will_adjust[:vote_ct*2] = np.ones(vote_ct*2)
-# cw = class_weight.compute_sample_weight('balanced', (will_adjust != 0))
-# max_sample_weight = cw.max() / cw.min()
-# print('max_sample_weight', max_sample_weight)
-max_sample_weight = 100.
+from sklearn.utils import class_weight
+will_adjust = np.zeros(rhs.shape[0])
+will_adjust[:vote_ct*2] = np.ones(vote_ct*2)
+cw = class_weight.compute_sample_weight('balanced', (will_adjust != 0))
+max_sample_weight = cw.max() / cw.min()
+print('max_sample_weight', max_sample_weight)
 
 
 max_evals = 400
@@ -75,19 +74,19 @@ def objective(trial):
     h = Box({})
     h['layers'] = trial.suggest_int('layers', 1, 2)
     for i in range(h.layers):
-        h[f"l{i}"] = trial.suggest_uniform(f"l{i}", .1, 1.)
-    h['act'] = trial.suggest_categorical('act', ['relu', 'elu', 'tanh'])
-    h['loss'] = trial.suggest_categorical('loss', ['mse', 'mae'])
-    h['batch'] = int(trial.suggest_uniform('batch', 32, 325))
+        h[f"l{i}"] = .65 # trial.suggest_uniform(f"l{i}", .1, 1.)
+    h['act'] = 'relu' # trial.suggest_categorical('act', ['relu', 'elu', 'tanh'])
+    h['loss'] = 'mae' # trial.suggest_categorical('loss', ['mse', 'mae'])
+    h['batch'] = int(trial.suggest_uniform('batch', 64, 512))
     h['bn'] = True # trial.suggest_categorical('bn', [True, False])
-    h['normalize'] = trial.suggest_categorical('normalize', [True, False])
-    h['opt'] = trial.suggest_categorical('opt', ['amsgrad', 'nadam'])
+    h['normalize'] = True # trial.suggest_categorical('normalize', [True, False])
+    h['opt'] = 'nadam' # trial.suggest_categorical('opt', ['amsgrad', 'nadam'])
     h['lr'] = .0004 # trial.suggest_uniform('lr', .0001, .001)
     h['sw_mine'] = trial.suggest_uniform('sw_mine', 2., max_sample_weight)
     sw_other = trial.suggest_uniform('sw_other', .01, 1.)
     h['sw_other'] = max(1.5, sw_other * h.sw_mine)
-    h['std_mine'] = .3 # trial.suggest_uniform('std_mine', .1, .5)
-    std_other = .15 # trial.suggest_uniform('std_other', .1, 1.)
+    h['std_mine'] = trial.suggest_uniform('std_mine', .1, .5)
+    std_other = trial.suggest_uniform('std_other', .1, 1.)
     h['std_other'] = max(.01, std_other * h.std_mine)
 
     df = pd.DataFrame({'title': books.title})
@@ -115,7 +114,7 @@ def objective(trial):
     cts['orig'] = titles.apply(ct_match('entries')).sum()
     for k in ['mine_up', 'mine_down', 'other_up', 'other_down']:
         cts[k] = titles.apply(ct_match(k)).sum()
-    score = cts.orig + cts.mine_up * 1.5 - cts.mine_down\
+    score = cts.orig + cts.mine_up * 1.3 - cts.mine_down\
         + cts.other_up*.1 - cts.other_down*.1
     trial.set_user_attr('mse', float(mse))
     for k, v in cts.items():
@@ -146,8 +145,6 @@ study = optuna.create_study(study_name=STUDY, **study_args)
 if args_p.init:
     dh = CosineEstimator.default_hypers
     study.enqueue_trial(dh)
-    study.enqueue_trial({**dh, **dict(normalize=False)})
-    study.enqueue_trial({**dh, **dict(l0=.3)})
-    study.enqueue_trial({**dh, **dict(batch=128)})
-    study.enqueue_trial({**dh, **dict(opt='amsgrad')})
+    study.enqueue_trial({**dh, **dict(batch=500)})
+    study.enqueue_trial({**dh, **dict(sw_mine=200.)})
 study.optimize(objective, n_trials=max_evals, n_jobs=int(args_p.jobs), callbacks=[save_results])

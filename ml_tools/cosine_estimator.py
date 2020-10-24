@@ -24,17 +24,24 @@ def permute(arr: np.ndarray):
 
 class CosineEstimator:
     default_hypers = dict(
-        layers=1,  # winner=1
-        l0=.6,  # winner=.65
-        act='relu',  # winner=relu
-        loss='mae',  # winner=mae
-        batch=300,  # winner=324
-        bn=True,  # inconclusive
+        layers=1,  # win=1
+        l0=.65,  # win=.55-.8
+        act='relu',  # win=relu
+        loss='mae',  # win=mae
+        batch=300,  # win=300
+        bn=True,  # inconclusive (since win.layers=1)
         opt='nadam',  # winner=nadam (TODO try AdamW)
         lr=.0004,  # winner=.0004
-        normalize=True,  # inconclusive
-        sw_mine=50.,
-        sw_other=.04, # multiplied by ^
+        normalize=True,  # win=True
+
+        # The above are solid winners. Below are still work in progress / hard to optmize.
+        # sw_mine, sw_other winners
+        # 95.90945467591888, 0.03522867388231844
+        # 94.29366495956107, 0.2479051508079999
+        # 33.48236563125175, 0.135911997641221
+        # 45.1694413229026, 0.13853704778654738
+        sw_mine=75.,
+        sw_other=.04, # multiplied by ^. Super inconclusive, .035-.65; judge on actual user experiments
         std_mine=.3,
         std_other=.15  # multiplied by ^
     )
