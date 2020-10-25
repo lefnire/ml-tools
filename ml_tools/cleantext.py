@@ -255,7 +255,7 @@ class CleanText:
         # I give up, non-parallel it is!
         for doc in nlp.pipe(docs):
             assert doc, "keywords() got empty document. This should be handled in @wrapper"
-            pbar.update(1)
+            if not silent: pbar.update(1)
             tokens = []
             for t in doc:
                 # https://spacy.io/api/token
