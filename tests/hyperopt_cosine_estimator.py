@@ -37,7 +37,7 @@ searches = Box(
     other_down=votes.other_down
 )
 
-vote_ct = 200
+vote_ct = 100
 def adjust(k):
     ct = 0
     def adjust_(text):
@@ -55,18 +55,19 @@ def ct_match(k):
         return 1 if re.search(searches[k], txt, re.IGNORECASE) else 0
     return ct_match_
 
-STUDY = "study14"
+STUDY = "study18"
 DB = os.getenv("DB_URL", None)
 if DB:
     from sqlalchemy import create_engine
     engine = create_engine(DB)
 
-from sklearn.utils import class_weight
-will_adjust = np.zeros(rhs.shape[0])
-will_adjust[:vote_ct*2] = np.ones(vote_ct*2)
-cw = class_weight.compute_sample_weight('balanced', (will_adjust != 0))
-max_sample_weight = cw.max() / cw.min()
-print('max_sample_weight', max_sample_weight)
+# from sklearn.utils import class_weight
+# will_adjust = np.zeros(rhs.shape[0])
+# will_adjust[:vote_ct*2] = np.ones(vote_ct*2)
+# cw = class_weight.compute_sample_weight('balanced', (will_adjust != 0))
+# max_sample_weight = cw.max() / cw.min()
+# print('max_sample_weight', max_sample_weight)
+max_sample_weight = 100.
 
 
 max_evals = 400
@@ -83,12 +84,11 @@ def objective(trial):
     h['opt'] = 'nadam' # trial.suggest_categorical('opt', ['amsgrad', 'nadam'])
     h['lr'] = .0004 # trial.suggest_uniform('lr', .0001, .001)
     h['sw_mine'] = trial.suggest_uniform('sw_mine', 2., max_sample_weight)
-    sw_other = trial.suggest_uniform('sw_other', .01, 1.)
-    h['sw_other'] = max(1.5, sw_other * h.sw_mine)
-    h['std_mine'] = trial.suggest_uniform('std_mine', .1, .5)
-    std_other = trial.suggest_uniform('std_other', .1, 1.)
-    h['std_other'] = max(.01, std_other * h.std_mine)
-    h['shuffle'] = trial.suggest_categorical('shuffle', [True, False, 'batch'])
+    h['sw_other'] = trial.suggest_uniform('sw_other', 1., 2.)
+    h['std_mine'] = .3 # trial.suggest_uniform('std_mine', .1, .5)
+    # std_other = trial.suggest_uniform('std_other', .1, 1.)
+    h['std_other'] = .1 # max(.01, std_other * h.std_mine)
+    h['shuffle'] = trial.suggest_categorical('shuffle', [True, False])
 
     df = pd.DataFrame({'title': books.title})
     adjusts = []
@@ -115,8 +115,8 @@ def objective(trial):
     cts['orig'] = titles.apply(ct_match('entries')).sum()
     for k in ['mine_up', 'mine_down', 'other_up', 'other_down']:
         cts[k] = titles.apply(ct_match(k)).sum()
-    score = cts.orig + cts.mine_up * 1.25 - cts.mine_down\
-        + cts.other_up*.125 - cts.other_down*.1
+    score = cts.orig + cts.mine_up * 1.15 - cts.mine_down\
+        + cts.other_up*.15 - cts.other_down*.1
     trial.set_user_attr('mse', float(mse))
     for k, v in cts.items():
         trial.set_user_attr(k, float(v))
@@ -146,7 +146,7 @@ study = optuna.create_study(study_name=STUDY, **study_args)
 if args_p.init:
     dh = CosineEstimator.default_hypers
     study.enqueue_trial(dh)
-    study.enqueue_trial({**dh, **dict(batch=500)})
-    study.enqueue_trial({**dh, **dict(shuffle='batch')})
     study.enqueue_trial({**dh, **dict(shuffle=False)})
+    study.enqueue_trial({**dh, **dict(sw_mine=25.)})
+    study.enqueue_trial({**dh, **dict(sw_other=1.1)})
 study.optimize(objective, n_trials=max_evals, n_jobs=int(args_p.jobs), callbacks=[save_results])

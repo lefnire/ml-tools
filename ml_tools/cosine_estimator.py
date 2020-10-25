@@ -43,9 +43,9 @@ class CosineEstimator:
         # 33.48236563125175, 0.135911997641221
         # 45.1694413229026, 0.13853704778654738
         sw_mine=75.,
-        sw_other=.04, # multiplied by ^. Super inconclusive, .035-.65; judge on actual user experiments
+        sw_other=1.15,
         std_mine=.3,
-        std_other=.15  # multiplied by ^
+        std_other=.1
     )
     """
     Neural network that learns the cosine DISTANCE function (between 0-1, 0 being similar, 1 being distant). Also
@@ -165,7 +165,7 @@ class CosineEstimator:
             fit_args = dict(
                 sample_weight=sw_train,
                 validation_data=(x_val, y_val, sw_val),
-                shuffle=h.shuffle
+                shuffle=h.shuffle  # 'batch' totally breaks accuracy!
             )
         else:
             x_train, x_val, y_train, y_val = train_test_split(x, y, test_size=.3, shuffle=True)
