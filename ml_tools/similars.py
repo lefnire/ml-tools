@@ -262,12 +262,15 @@ class Similars:
                 return (x, y), (np.ones(x.shape[0]).astype(int), np.ones(y.shape[0]).astype(int))
 
         if algo == 'agglomorative':
-            model, model_args = AgglomerativeClustering, dict(affinity='precomputed', linkage='average')
+            model = AgglomerativeClustering
+            model_args = dict(affinity='precomputed', linkage='average')
+            sil_args = dict(metric='precomputed', linkage='average')
             c = Similars(both)
             if self.last_fn != 'normalize': c = c.normalize()
             both = c.cosine(abs=True).value()
+            np.fill_diagonal(both, 0)  # silhouette_score precomputed requires this
         else:
-            model, model_args = KMeans, {}
+            model, model_args, sil_args = KMeans, {}, {}
 
         # Find optimal number of clusters (62006ffb for kmeans.intertia_ knee approach)
         guess = Box(
@@ -279,7 +282,7 @@ class Similars:
         best = Box(model=None, nc=None, score=None)
         for nc in K:
             m = model(n_clusters=nc, **model_args).fit(both)
-            score = silhouette_score(both, m.labels_)
+            score = silhouette_score(both, m.labels_, **sil_args)
             if best.model is None or score > best.score:
                 best.score, best.model, best.nc = score, m, nc
         print(f"{algo}(n={n}) best.nc={best.nc},score={round(best.score, 2)}. guess.guess={guess.guess},max={guess.max}")
