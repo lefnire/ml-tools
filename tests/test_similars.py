@@ -54,6 +54,30 @@ def test_cluster(k, algo):
         assert len(res) < len(x)
 
 
+@pytest.mark.parametrize(*xy_param)
+@pytest.mark.parametrize("algo", ("agglomorative", "kmeans"))
+@pytest.mark.parametrize("n", (3, 4))
+def test_cluster_not_enough(k, algo, n):
+    if k == 'x':
+        x_ = x[:n]
+        c = Similars(x_)
+    else:
+        x_, y_ = x[:1], y[:n-1]
+        c = Similars(x_, y_)
+    c = c.embed().normalize().cluster(algo=algo)
+    res = c.value()
+    if k == "xy":
+        assert len(res) == 2
+        assert len(res[0]) == len(x_)
+        assert len(res[1]) == len(y_)
+        assert len(c.data.labels[1]) == len(y_)
+        assert (c.data.labels[1] == 1).all()
+    else:
+        assert len(c.data.labels) == len(x_)
+        assert (c.data.labels == 1).all()
+        assert len(res) == len(x_)
+
+
 # @pytest.mark.skip
 # @pytest.mark.parametrize(
 #     "path,k,algo,x,y",

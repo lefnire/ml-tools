@@ -6,7 +6,7 @@ from kneed import KneeLocator
 from sklearn.cluster import MiniBatchKMeans as KMeans
 from sentence_transformers import SentenceTransformer, util
 from typing import List, Union
-from sklearn.metrics import pairwise_distances
+from sklearn.metrics import pairwise_distances, silhouette_score
 from scipy.spatial.distance import jensenshannon
 from sklearn.feature_extraction.text import TfidfVectorizer
 from .autoencoder import autoencode
@@ -242,9 +242,6 @@ class Similars:
         else:
             return cdist(x, y, metric='jensenshannon')
 
-    def _default_n_clusters(self, x):
-        return math.floor(1 + 3.5 * math.log10(x.shape[0]))
-
     # Don't set device_in, in case algo=agg & cluster_both=True
     @chain(keep='labels', device_in='cpu')
     def cluster(self, x, y, algo='agglomorative'):
@@ -254,30 +251,41 @@ class Similars:
         this is what you want, otherwise cluster x separately on a different chain
         """
         both = self._join(x, y)
+        n = both.shape[0]
+
+        # Number entries < 4 not enough to cluster from, return as-is
+        if n < 5:
+            if y is None:
+                return x, np.ones(n).astype(int)
+            else:
+                x, y = self._split(both, x, y)
+                return (x, y), (np.ones(x.shape[0]).astype(int), np.ones(y.shape[0]).astype(int))
+
         if algo == 'agglomorative':
+            model, model_args = AgglomerativeClustering, dict(affinity='precomputed', linkage='average')
             c = Similars(both)
             if self.last_fn != 'normalize': c = c.normalize()
             both = c.cosine(abs=True).value()
-            nc = self._default_n_clusters(both)
-            labels = AgglomerativeClustering(
-                n_clusters=nc,
-                affinity='precomputed',
-                linkage='average'
-            ).fit_predict(both)
-        elif algo == 'kmeans':
-            # Code from https://github.com/arvkevi/kneed/blob/master/notebooks/decreasing_function_walkthrough.ipynb
-            step = 2  # math.ceil(guess.max / 10)
-            K = range(2, 40, step)  # FIXME use smarter min,max
-            scores = []
-            for k in K:
-                km = KMeans(n_clusters=k).fit(both)
-                scores.append(km.inertia_)
-            S = 1  # math.floor(math.log(all.shape[0]))  # 1=default; 100entries->S=2, 8k->3
-            kn = KneeLocator(list(K), scores, S=S, curve='convex', direction='decreasing', interp_method='polynomial')
-            nc = kn.knee or self._default_n_clusters(both)
-            labels = KMeans(n_clusters=nc).fit(both).labels_
         else:
-            raise Exception("Other clusterers not yet supported (use kmeans|agglomorative)")
+            model, model_args = KMeans, {}
+
+        # Find optimal number of clusters (62006ffb for kmeans.intertia_ knee approach)
+        guess = Box(
+            guess=math.floor(1 + 3.5 * math.log10(n)),
+            max=min(math.ceil(n / 2), 50),  # math.floor(1 + 5 * math.log10(n))
+        )
+        guess['step'] = math.ceil(guess.max / 10)
+        K = range(2, guess.max, guess.step)
+        best = Box(model=None, nc=None, score=None)
+        for nc in K:
+            m = model(n_clusters=nc, **model_args).fit(both)
+            score = silhouette_score(both, m.labels_)
+            if best.model is None or score > best.score:
+                best.score, best.model, best.nc = score, m, nc
+        print(f"{algo}(n={n}) best.nc={best.nc},score={round(best.score, 2)}. guess.guess={guess.guess},max={guess.max}")
+
+        # Label & return clustered centroids + labels
+        labels = best.model.labels_
         if y is None:
             return self.centroids(x, labels), labels
         l_x, l_y = self._split(labels, x, y)
