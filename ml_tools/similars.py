@@ -264,31 +264,32 @@ class Similars:
         if algo == 'agglomorative':
             model = AgglomerativeClustering
             model_args = dict(affinity='precomputed', linkage='average')
-            sil_args = dict(metric='precomputed', linkage='average')
             c = Similars(both)
             if self.last_fn != 'normalize': c = c.normalize()
             both = c.cosine(abs=True).value()
-            np.fill_diagonal(both, 0)  # silhouette_score precomputed requires this
         else:
-            model, model_args, sil_args = KMeans, {}, {}
+            model, model_args = KMeans, {}
 
-        # Find optimal number of clusters (62006ffb for kmeans.intertia_ knee approach)
+        # Find optimal number of clusters (619091ec for silhouette approach), it's not working for me
+        # (always gives nc=2). Wish it would work, since can use for agglomorative (metric=precomputed).
+        # For now, just using kmeans to decide nc, then switching to model of choice
         guess = Box(
-            guess=math.floor(1 + 3.5 * math.log10(n)),
+            guess=math.floor(1 + 3 * math.log10(n)),
             max=min(math.ceil(n / 2), 50),  # math.floor(1 + 5 * math.log10(n))
+            step=1  # math.ceil(guess.max / 10)
         )
-        guess['step'] = math.ceil(guess.max / 10)
         K = range(2, guess.max, guess.step)
-        best = Box(model=None, nc=None, score=None)
-        for nc in K:
-            m = model(n_clusters=nc, **model_args).fit(both)
-            score = silhouette_score(both, m.labels_, **sil_args)
-            if best.model is None or score > best.score:
-                best.score, best.model, best.nc = score, m, nc
-        print(f"{algo}(n={n}) best.nc={best.nc},score={round(best.score, 2)}. guess.guess={guess.guess},max={guess.max}")
+        scores = [
+            KMeans(n_clusters=k).fit(both).inertia_
+            for k in K
+        ]
+        S = .25 # math.floor(math.log(all.shape[0]))  # 1=default; 100entries->S=2, 8k->3
+        kn = KneeLocator(list(K), scores, S=S, curve='convex', direction='decreasing')
+        nc = kn.knee or guess.guess
+        labels = model(n_clusters=nc, **model_args).fit_predict(both)
+        print(f"{algo}(n={n}) nc={nc} guess={guess.guess} max={guess.max} step={guess.step}")
 
         # Label & return clustered centroids + labels
-        labels = best.model.labels_
         if y is None:
             return self.centroids(x, labels), labels
         l_x, l_y = self._split(labels, x, y)
