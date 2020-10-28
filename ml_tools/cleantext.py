@@ -9,6 +9,7 @@ from .utils import THREADS
 from textacy.preprocessing import replace as treplace
 from urllib.parse import urlparse
 from typing import List
+import numpy as np
 import logging
 
 logger = logging.getLogger(__name__)
@@ -302,10 +303,11 @@ class CleanText:
             logger.info(f"After bigrams {len(tokens)}")
         return docs, tokens
 
-    @one_or_many()
-    def join(self, terms: List[str]):
+    @one_or_many(batch=True)
+    def join(self, docs: List[List[str]]):
         """
         keywords() returns lists of tokens, this joins it back into strings
         """
-        if type(terms) == str: return terms
-        return ' '.join(terms)
+        # meant to lists of terms, so ensure we're not getting `str` or `List[str]`
+        while np.array(docs).ndim < 2: docs = [docs]
+        return [' '.join(terms) for terms in docs]
