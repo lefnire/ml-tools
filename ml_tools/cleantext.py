@@ -309,6 +309,7 @@ class CleanText:
         keywords() returns lists of tokens, this joins it back into strings
         """
         # meant to lists of terms, so ensure we're not getting `str` or `List[str]`
+        if not docs: return docs
         if type(docs) == str: docs = [docs]
         if type(docs[0]) == str: docs = [docs]
         return [' '.join(terms) for terms in docs]
