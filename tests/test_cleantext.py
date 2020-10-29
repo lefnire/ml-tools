@@ -64,7 +64,7 @@ def test_md_split_specific(content):
 # @pytest.mark.parametrize("group_by", [None, "article", "paragraph"])
 @pytest.mark.parametrize("fmt", ["md", "txt"])
 @pytest.mark.parametrize("coverage", ["basic", "full"])
-@pytest.mark.parametrize("mode", ["fast", "accurate"])
+@pytest.mark.parametrize("mode", ["fast"]) # TODO put "accurate" back in, slows down tests
 def test_normalize(fmt, coverage, mode):
     chain = CleanText(articles(fmt=fmt))
     if coverage == "basic":
@@ -144,3 +144,21 @@ def test_strip_html(content):
 ])
 def test_keywords_fast(content):
     assert CleanText(content[0]).keywords(mode='fast').join().value() == content[1]
+
+
+@pytest.mark.parametrize("content", [
+    (0, "token1 token2 token3 token4"),
+    (1, ["token1", "token2", "token3", "token4"]),
+    (2, [["token1", "token2"], ["token3", "token4"]])
+])
+def test_join(content):
+    ndim, content = content
+    v = CleanText(content).join().value()
+    if ndim == 0:
+        assert content == 'token1 token2 token3 token4'
+    if ndim == 1:
+        assert v == 'token1 token2 token3 token4'
+    if ndim == 2:
+        assert len(v) == 2
+        assert v[0] == 'token1 token2'
+        assert v[1] == 'token3 token4'
