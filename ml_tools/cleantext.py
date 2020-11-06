@@ -207,7 +207,11 @@ class CleanText:
                 else:
                     paras[-1] += " " + text
                 last_tag = tag
-        return paras
+        return [
+            p for p in paras
+            # ensure at least one word per paragraph
+            if len(re.findall(r"\S+", p)) > 1
+        ]
 
 
     # You'll never really call this on a single doc, so one_or_many is pointless; just error-preventing
