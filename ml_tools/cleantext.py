@@ -84,7 +84,7 @@ def one_or_many(batch=False, keep=None):
             single = type(txt) == str
             if single: txt = [txt]
             # most functions can't handle empty strings
-            txt = [t or "empty document" for t in txt]
+            txt = [t or "empty" for t in txt]
             txt = fn(self, txt, *args, **kwargs) if batch\
                 else  [fn(self, s, *args, **kwargs) for s in txt]
 
@@ -285,6 +285,8 @@ class CleanText:
                     t = t.lower()
                     if len(t) < 2: continue
                 tokens.append(t)
+            # got an edge-case "what is this for?" all stop-words/punct, so full-removal. Reconsider
+            tokens = tokens or ["empty"]
             clean.append(tokens)
         docs = clean
         if pbar: pbar.close()
