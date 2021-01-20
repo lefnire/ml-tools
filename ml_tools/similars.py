@@ -118,12 +118,12 @@ class Similars:
         return t.unsqueeze(0)
 
     @chain(together=True)
-    def embed(self, both: List[str], batch_size=32):
+    def embed(self, both: List[str], batch_size=32, show_progress_bar=True, convert_to_tensor=True):
         return SentenceTransformer('roberta-base-nli-stsb-mean-tokens').encode(
             both,
             batch_size=batch_size,
-            show_progress_bar=True,
-            convert_to_tensor=True
+            show_progress_bar=show_progress_bar,
+            convert_to_tensor=convert_to_tensor
         )
 
     @chain(together=True)
