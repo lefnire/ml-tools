@@ -9,7 +9,7 @@ from typing import List, Union
 from sklearn.metrics import pairwise_distances, silhouette_score
 from scipy.spatial.distance import jensenshannon
 from sklearn.feature_extraction.text import TfidfVectorizer
-from .autoencoder import autoencode
+# from .autoencoder import autoencode
 from sklearn.decomposition import PCA
 from scipy.spatial.distance import cdist
 from box import Box
@@ -302,7 +302,7 @@ class Similars:
             for l in range(labels.max())
         ])
 
-    @chain(device_in='cpu')
-    def autoencode(self, x, y, dims=[500,150,20], filename=None, batch_norm=True):
-        assert y is None, "Don't pass y into autoencode (FIXME)"
-        return autoencode(x, dims, filename, batch_norm)
+    # @chain(device_in='cpu')
+    # def autoencode(self, x, y, dims=[500,150,20], filename=None, batch_norm=True):
+    #     assert y is None, "Don't pass y into autoencode (FIXME)"
+    #     return autoencode(x, dims, filename, batch_norm)
