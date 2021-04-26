@@ -14,8 +14,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-from stanza.resources.common import DEFAULT_MODEL_DIR
-SPACY_GPU = True
+SPACY_GPU = False
 import spacy
 # Putting spacy files in same folder as stanza files
 # spacy.util.set_data_path(DEFAULT_MODEL_DIR)
@@ -23,23 +22,8 @@ if SPACY_GPU:
     spacy.prefer_gpu()
 
 import lemminflect  # just import. Ties itself into spacy internals
-# nlp_fast = spacy.load('en', disable=['parser', 'ner'])
-nlp_fast = spacy.load('en_core_web_sm')
-
-nlp_accurate = None
-def init_nlp_accurate():
-    global nlp_accurate
-    # CPU actually faster than cpu! (6it/s v 30it/s). Setting to True for now since I have one,
-    # might as well save some CPU
-    # a1eed8c3: lemminflect
-    import stanza
-    from spacy_stanza import StanzaLanguage
-    proc = 'tokenize,pos,lemma,ner'
-    if not os.path.exists(DEFAULT_MODEL_DIR):
-        stanza.download('en_core_web_sm')
-    snlp = stanza.Pipeline(lang="en", processors=proc, use_gpu=SPACY_GPU)
-    nlp_accurate = StanzaLanguage(snlp)
-
+# nlp = spacy.load('en', disable=['parser', 'ner'])
+nlp = None
 
 # See gensim.parsing.preprocessing.RE_PUNCT
 # RE_PUNCT = re.compile(r'([%s])+' % re.escape(string.punctuation), re.UNICODE)
@@ -220,7 +204,7 @@ class CleanText:
         self,
         docs,
         postags=['NOUN', 'ADJ', 'VERB', 'PROPN'],
-        mode='fast',
+        model="en_core_web_sm",
         silent=False,
         bigrams=True,
 
@@ -232,27 +216,21 @@ class CleanText:
         Extracs keywords from documents using spacy lemmatization.
         :param docs: documents
         :param postags: which POS_TAGS to include. Pretty important param, you might also want to add PROPN
-        :param mode: (fast|accurate). Fast uses lemminflect, accurate uses Stanford NLP. Pretty substantial in their
-            trade-off IMO. Could use some helping eyes on this code.
+        :param model: en_core_web_sm for speed; en_core_web_trf for accuracy
         :param silent: whether to print progress (it can take a while, so progress bar)
         :param bigrams: whether to include bigrams
         """
+        global nlp
+        if nlp is None:
+            nlp = spacy.load(model)
+
         # could ensure they call this before keywords, because spacy is brittle without it, but this is easier.
         docs = [mult_whitespace(d) for d in docs]
-
-        if mode == 'fast':
-            nlp = nlp_fast
-            mode_ = "Spacy + Lemminflect"
-        else:
-            if nlp_accurate is None:
-                init_nlp_accurate()
-            nlp = nlp_accurate
-            mode_ = "spacy-stanza (Stanford NLP)"
 
         pbar = None
         if not silent:
             pbar = tqdm(total=len(docs))
-            logger.info(f"Lemmatizing keywords with {mode_}")
+            logger.info(f"Lemmatizing keywords with Spacy + Lemminflect")
 
         clean = []
         # batch_size doesn't seem to matter; n_process doesn't work with GPU, locks in CPU. n_threads deprecated
@@ -281,7 +259,7 @@ class CleanText:
                 elif t.pos_ not in postags:
                     continue
                 else:
-                    t = t._.lemma() if mode == 'fast' else t.lemma_
+                    t = t._.lemma()
                     t = t.lower()
                     if len(t) < 2: continue
                 tokens.append(t)
