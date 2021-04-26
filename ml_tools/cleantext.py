@@ -24,7 +24,7 @@ if SPACY_GPU:
 
 import lemminflect  # just import. Ties itself into spacy internals
 # nlp_fast = spacy.load('en', disable=['parser', 'ner'])
-nlp_fast = spacy.load('en')
+nlp_fast = spacy.load('en_core_web_sm')
 
 nlp_accurate = None
 def init_nlp_accurate():
@@ -36,7 +36,7 @@ def init_nlp_accurate():
     from spacy_stanza import StanzaLanguage
     proc = 'tokenize,pos,lemma,ner'
     if not os.path.exists(DEFAULT_MODEL_DIR):
-        stanza.download('en')
+        stanza.download('en_core_web_sm')
     snlp = stanza.Pipeline(lang="en", processors=proc, use_gpu=SPACY_GPU)
     nlp_accurate = StanzaLanguage(snlp)
 
