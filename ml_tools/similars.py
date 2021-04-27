@@ -262,32 +262,35 @@ class Similars:
                 return (x, y), (np.ones(x.shape[0]).astype(int), np.ones(y.shape[0]).astype(int))
 
         if algo == 'agglomorative':
-            model = AgglomerativeClustering
-            model_args = dict(affinity='precomputed', linkage='average')
-            c = Similars(both)
-            if self.last_fn != 'normalize': c = c.normalize()
-            both = c.cosine(abs=True).value()
+            if self.last_fn != 'normalize':
+                # both = Similars(both).normalize().cosine(abs=True).value()
+                both = both / np.linalg.norm(both, axis=1, keepdims=True)
+            # distance_threshold determines auto n_clusters, 1.5 was recommended
+            # 1.5 gives me 40-nc, 2. gives me 13-nc
+            # labels = AgglomerativeClustering(affinity='precomputed', linkage='average')
+            labels = AgglomerativeClustering(n_clusters=None, distance_threshold=1.5)\
+                .fit_predict(both)
+            nc = len(np.unique(labels))
+            print(f"{algo}(n={n}) nc={nc}")
         else:
-            model, model_args = KMeans, {}
-
-        # Find optimal number of clusters (619091ec for silhouette approach), it's not working for me
-        # (always gives nc=2). Wish it would work, since can use for agglomorative (metric=precomputed).
-        # For now, just using kmeans to decide nc, then switching to model of choice
-        guess = Box(
-            guess=math.floor(1 + 3 * math.log10(n)),
-            max=min(math.ceil(n / 2), 50),  # math.floor(1 + 5 * math.log10(n))
-            step=1  # math.ceil(guess.max / 10)
-        )
-        K = range(2, guess.max, guess.step)
-        scores = [
-            KMeans(n_clusters=k).fit(both).inertia_
-            for k in K
-        ]
-        S = .25 # math.floor(math.log(all.shape[0]))  # 1=default; 100entries->S=2, 8k->3
-        kn = KneeLocator(list(K), scores, S=S, curve='convex', direction='decreasing')
-        nc = kn.knee or guess.guess
-        labels = model(n_clusters=nc, **model_args).fit_predict(both)
-        print(f"{algo}(n={n}) nc={nc} guess={guess.guess} max={guess.max} step={guess.step}")
+            # Find optimal number of clusters (619091ec for silhouette approach), it's not working for me
+            # (always gives nc=2). Wish it would work, since can use for agglomorative (metric=precomputed).
+            # For now, just using kmeans to decide nc, then switching to model of choice
+            guess = Box(
+                guess=math.floor(1 + 3 * math.log10(n)),
+                max=min(math.ceil(n / 2), 50),  # math.floor(1 + 5 * math.log10(n))
+                step=1  # math.ceil(guess.max / 10)
+            )
+            K = range(2, guess.max, guess.step)
+            scores = [
+                KMeans(n_clusters=k).fit(both).inertia_
+                for k in K
+            ]
+            S = .25 # math.floor(math.log(all.shape[0]))  # 1=default; 100entries->S=2, 8k->3
+            kn = KneeLocator(list(K), scores, S=S, curve='convex', direction='decreasing')
+            nc = kn.knee or guess.guess
+            print(f"{algo}(n={n}) nc={nc} guess={guess.guess} max={guess.max} step={guess.step}")
+            labels = KMeans(n_clusters=nc).fit_predict(both)
 
         # Label & return clustered centroids + labels
         if y is None:
